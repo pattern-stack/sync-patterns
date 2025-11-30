@@ -18,23 +18,26 @@ A CLI that generates typed clients from OpenAPI specs, enabling local-first appl
 ## Architecture
 
 ```
-BACKEND-PATTERNS (Postgres - source of truth)
-        │
-        │  Models declare sync mode via annotations
-        ▼
-   SYNC-PATTERNS CLI
-        │
-        │  Reads OpenAPI spec (includes sync metadata)
-        │  Generates: types, hooks, SQLite schema
-        ▼
-   ELECTRICSQL (sync engine for 'live' mode)
-        │
-        ▼
-   TANSTACK DB + TANSTACK QUERY (client layer)
-        │
-        ▼
-FRONTEND-PATTERNS (SQLite - source of change)
+┌─────────────────────────────────────────────────────────────────┐
+│                         CLIENT                                  │
+│  ┌──────────┐    ┌──────────────┐    ┌───────────────────────┐ │
+│  │   UI     │◄──►│  TanStack DB │◄──►│  Local SQLite         │ │
+│  │          │    │  (reactive)  │    │  (source of change)   │ │
+│  └──────────┘    └──────────────┘    └───────────────────────┘ │
+│                                              │                  │
+│                                              │ sync             │
+└──────────────────────────────────────────────│──────────────────┘
+                                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         SERVER                                  │
+│  ┌──────────────┐    ┌───────────────────────┐                 │
+│  │  ElectricSQL │◄──►│  Postgres             │                 │
+│  │  (sync)      │    │  (source of truth)    │                 │
+│  └──────────────┘    └───────────────────────┘                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key insight**: Local SQLite is always present. The question is: *when do we tell the user it worked?*
 
 ---
 
@@ -45,19 +48,83 @@ See [Architecture Decision Records](adr/README.md) for full context.
 | Decision | Summary | ADR |
 |----------|---------|-----|
 | Sync Stack | TanStack DB + TanStack Query + ElectricSQL | [ADR-001](adr/001-sync-stack-selection.md) |
-| Sync Modes | `push`, `live`, `cache` (Phase 2) | [ADR-002](adr/002-sync-modes.md) |
-| Defaults | `push` default, backend wins conflicts, convention over config | [ADR-003](adr/003-default-behaviors.md) |
-| Phasing | Phase 1: push/live, Phase 2: cache | [ADR-004](adr/004-phased-implementation.md) |
+| Write Modes | `local_first` (optimistic) vs confirmed | [ADR-002](adr/002-sync-modes.md) |
+| Defaults | `local_first=False` (safe), backend wins conflicts | [ADR-003](adr/003-default-behaviors.md) |
+| Phasing | Phase 1: metadata foundation, Phase 2: RBAC enforcement | [ADR-004](adr/004-phased-implementation.md) |
 
 ---
 
-## Sync Modes
+## Write Modes
 
-| Mode | Behavior | Phase |
-|------|----------|-------|
-| `push` | Direct API calls via TanStack Query | 1 |
-| `live` | Real-time sync via ElectricSQL → local SQLite | 1 |
-| `cache` | Sync pre-computed results from metrics layer | 2 |
+| Mode | Config | Behavior | Use Case |
+|------|--------|----------|----------|
+| **Optimistic** | `local_first = True` | Write to local DB, sync later, UI instant | User data, collaborative editing |
+| **Confirmed** | `local_first = False` | Write to local DB, wait for server | Financial, permission-sensitive |
+
+Both modes use local SQLite. The difference is **when we tell the user it worked**.
+
+---
+
+## Backend-Patterns Integration
+
+> **Full Spec**: [SYNC-001-backend-patterns-integration.md](specs/SYNC-001-backend-patterns-integration.md)
+
+### Model Configuration
+
+```python
+class Contact(ActorPattern):
+    __tablename__ = "contacts"
+
+    class Pattern:
+        entity = "contact"
+
+        # === Sync Configuration ===
+        local_first = True  # Optimistic writes
+
+        # === RBAC Metadata (not enforced in Phase 1) ===
+        field_groups = {
+            "basic": ["first_name", "last_name", "email"],
+            "financial": ["credit_limit"],
+        }
+        role_permissions = {
+            "viewer": [],
+            "editor": ["basic"],
+            "owner": ["basic", "financial"],
+        }
+
+    # Standard fields
+    first_name = Field(str, required=True)
+    email = Field(str, unique=True)
+
+    # Local-only field (not synced)
+    local_notes = Field(str, sync_exclude=True)
+
+    # Owner-only field (RBAC metadata, not enforced yet)
+    credit_limit = Field(Decimal, owner_only=True)
+```
+
+### OpenAPI Extensions
+
+sync-patterns reads these from the generated OpenAPI spec:
+
+```yaml
+paths:
+  /api/contacts:
+    x-sync:
+      local_first: true
+    x-rbac:
+      field_groups: {...}
+      role_permissions: {...}
+
+components:
+  schemas:
+    Contact:
+      properties:
+        local_notes:
+          x-sync-exclude: true
+        credit_limit:
+          x-owner-only: true
+```
 
 ---
 
@@ -65,51 +132,73 @@ See [Architecture Decision Records](adr/README.md) for full context.
 
 | Aspect | Default | Override |
 |--------|---------|----------|
-| Sync mode | `push` | `sync: live` on model |
-| Conflict resolution | Backend wins | Configurable per model |
-| Sync timing | Immediate with retry | Configurable |
-| Fields synced | All | `sync_exclude: [field]` |
+| Write mode | `local_first = False` | `local_first = True` on Pattern |
+| Fields synced | All | `sync_exclude=True` on Field |
+| Field editability | Any role | `owner_only=True` on Field |
+| Conflict resolution | Backend wins | Future: configurable |
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Core Sync (Current Target)
+### Phase 1: Metadata Foundation (Current Target)
 
-- [ ] Define model annotation syntax for backend-patterns
-- [ ] CLI reads OpenAPI spec with sync metadata
+**Backend-Patterns Changes:**
+- [x] Design spec complete ([SYNC-001](specs/SYNC-001-backend-patterns-integration.md))
+- [ ] Add `local_first` to Pattern config with validation
+- [ ] Add `sync_exclude` to Field class
+- [ ] Add `owner_only` to Field class (metadata only)
+- [ ] Add `field_groups` / `role_permissions` to Pattern (metadata only)
+- [ ] Custom OpenAPI schema hook for `x-sync` and `x-rbac` extensions
+- [ ] Documentation
+
+**sync-patterns CLI:**
+- [ ] Read OpenAPI spec with `x-sync` extensions
 - [ ] Generate TypeScript types
-- [ ] Generate `push` mode hooks (TanStack Query)
-- [ ] Generate `live` mode hooks (TanStack DB + Electric)
-- [ ] Generate SQLite schema for `live` models
-- [ ] Documentation and examples
-- [ ] Integration test with real project
+- [ ] Generate optimistic mutation hooks (`local_first=True`)
+- [ ] Generate confirmed mutation hooks (`local_first=False`)
+- [ ] Generate SQLite schema for synced models
+- [ ] Integration test with finance_tracker
 
-### Phase 2: Cache Mode
+### Phase 2: RBAC Enforcement (Future)
 
-- [ ] Define cache mode configuration
-- [ ] Integrate with backend-patterns caching/metrics layer
-- [ ] Generate `cache` mode hooks
-- [ ] TTL and invalidation support
+- [ ] Role column in database join tables (`user_accounts.role`)
+- [ ] `_role` included in API responses
+- [ ] Server-side permission enforcement in API facade
+- [ ] Client-side permission checking in generated hooks
+- [ ] Permission-aware UI generation
 
 ### Phase 3: Advanced (Future)
 
-- [ ] Custom conflict resolution
-- [ ] Partial/filtered sync
+- [ ] Custom conflict resolution strategies
+- [ ] Partial/filtered sync (sync subsets of data)
 - [ ] Cross-platform clients (SwiftUI, Kotlin)
-- [ ] Batched sync modes
+- [ ] Cache mode for pre-computed metrics
+
+---
+
+## Current Authorization Model
+
+```
+Phase 1: If you can see it, you can use it.
+```
+
+- Access is binary via household/tenant scoping
+- No edit vs. view distinction per row
+- RBAC metadata is stored but NOT enforced
+- Enforcement comes in Phase 2 when RBAC requirements are concrete
 
 ---
 
 ## Open Questions
 
-Questions to be resolved as implementation progresses:
+~~1. **Model annotation syntax** - Exact syntax for declaring sync mode~~ ✅ Resolved: `local_first` in Pattern config
 
-1. **Model annotation syntax** - Exact syntax for declaring sync mode in backend-patterns models
-2. **ElectricSQL deployment** - How to deploy/manage Electric service
-3. **Sync timing configuration** - What configurability is needed beyond "immediate"?
-4. **Metrics layer integration** - How does cache mode connect to the metrics layer?
-5. **Error handling** - How to surface sync errors to the UI?
+Questions remaining:
+1. **ElectricSQL deployment** - How to deploy/manage Electric service
+2. **Error handling** - How to surface sync errors/rollbacks to UI
+3. **Conflict resolution** - What strategies beyond "backend wins"?
+4. **Cache mode** - How does it integrate with metrics layer? (Phase 3)
 
 ---
 
@@ -117,9 +206,9 @@ Questions to be resolved as implementation progresses:
 
 | Dependency | Status | Notes |
 |------------|--------|-------|
-| backend-patterns stability | In progress | Need stable model structure for annotations |
+| backend-patterns stability | ✅ Ready | Model structure stable, can add sync config |
 | frontend-patterns stability | In progress | Need stable project structure for generated code |
-| Metrics layer | Not started | Required for Phase 2 cache mode |
+| RBAC requirements | Not started | Required for Phase 2 enforcement |
 
 ---
 
@@ -128,14 +217,15 @@ Questions to be resolved as implementation progresses:
 | Date | Milestone |
 |------|-----------|
 | 2025-11-29 | Initial planning session; core decisions made (ADR-001 through ADR-004) |
+| 2025-11-29 | Backend-patterns integration review; SYNC-001 spec drafted |
 
 ---
 
 ## Notes & Ideas
 
-Space for capturing ideas, concerns, and notes during development:
-
-- *Add notes here as planning evolves*
+- **RBAC future direction**: Role-per-row via join table, `_role` in responses, client computes editability
+- **Optimistic rollback**: If server rejects, sync engine rolls back local change and surfaces error
+- **UI implications**: Client uses `_role` + `owner_only` metadata to show/hide edit controls
 
 ---
 
@@ -144,3 +234,4 @@ Space for capturing ideas, concerns, and notes during development:
 - [README.md](../README.md) - Project overview
 - [CLAUDE.md](../CLAUDE.md) - AI assistant context
 - [ADRs](adr/README.md) - Architecture decisions
+- [SYNC-001](specs/SYNC-001-backend-patterns-integration.md) - Backend-patterns integration spec
