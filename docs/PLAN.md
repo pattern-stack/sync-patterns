@@ -1,6 +1,6 @@
 # sync-patterns: Working Plan
 
-> **Last Updated**: 2025-11-29
+> **Last Updated**: 2025-12-01
 > **Status**: Planning Phase
 
 This is a living document that captures the current state of planning for sync-patterns. It will be updated as decisions are made and implementation progresses.
@@ -21,7 +21,7 @@ A CLI that generates typed clients from OpenAPI specs, enabling local-first appl
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLIENT                                  │
 │  ┌──────────┐    ┌──────────────┐    ┌───────────────────────┐ │
-│  │   UI     │◄──►│  TanStack DB │◄──►│  Local SQLite         │ │
+│  │   UI     │◄──►│  TanStack DB │◄──►│  PGlite (local)       │ │
 │  │          │    │  (reactive)  │    │  (source of change)   │ │
 │  └──────────┘    └──────────────┘    └───────────────────────┘ │
 │                                              │                  │
@@ -51,6 +51,8 @@ See [Architecture Decision Records](adr/README.md) for full context.
 | Write Modes | `local_first` (optimistic) vs confirmed | [ADR-002](adr/002-sync-modes.md) |
 | Defaults | `local_first=False` (safe), backend wins conflicts | [ADR-003](adr/003-default-behaviors.md) |
 | Phasing | Phase 1: metadata foundation, Phase 2: RBAC enforcement | [ADR-004](adr/004-phased-implementation.md) |
+| Local Database | PGlite (Postgres WASM), SQLite adapter for mobile later | [ADR-005](adr/005-local-database-selection.md) |
+| Write Pattern | Pattern 4: Through-the-Database | [ADR-006](adr/006-write-pattern-selection.md) |
 
 ---
 
@@ -61,7 +63,57 @@ See [Architecture Decision Records](adr/README.md) for full context.
 | **Optimistic** | `local_first = True` | Write to local DB, sync later, UI instant | User data, collaborative editing |
 | **Confirmed** | `local_first = False` | Write to local DB, wait for server | Financial, permission-sensitive |
 
-Both modes use local SQLite. The difference is **when we tell the user it worked**.
+Both modes use PGlite. The difference is **when we tell the user it worked**.
+
+---
+
+## Client-Side Architecture
+
+> **Full Spec**: [SYNC-002-client-architecture.md](specs/SYNC-002-client-architecture.md)
+
+### Pattern 4: Through-the-Database
+
+For each synced model, sync-patterns generates:
+
+| Component | Purpose |
+|-----------|---------|
+| `{entity}_synced` table | Immutable server state (from Electric) |
+| `{entity}_local` table | Optimistic/pending changes |
+| `{entity}` view | Unified read/write interface (local > synced) |
+| `_changes` table | Queue of writes to send to API |
+| Triggers | Route writes, log changes, cleanup on sync |
+
+### Write Flow
+
+```
+App writes to view
+       │
+       ▼
+Trigger routes to _local + _changes
+       │
+       ▼
+View reflects change (instant UI)
+       │
+       ▼ (background)
+Sync worker POSTs _changes to API
+       │
+       ▼
+Electric syncs from Postgres
+       │
+       ▼
+Cleanup trigger removes from _local
+```
+
+### Generated Output
+
+```
+src/generated/
+├── db/init.ts              # Database initialization
+├── schema/*.sql            # PGlite schemas
+├── collections/*.ts        # TanStack DB collections
+├── types/*.ts              # TypeScript interfaces
+└── index.ts                # Re-exports
+```
 
 ---
 
@@ -218,6 +270,7 @@ Questions remaining:
 |------|-----------|
 | 2025-11-29 | Initial planning session; core decisions made (ADR-001 through ADR-004) |
 | 2025-11-29 | Backend-patterns integration review; SYNC-001 spec drafted |
+| 2025-12-01 | Client-side architecture decisions; ADR-005, ADR-006, SYNC-002 drafted |
 
 ---
 
@@ -235,3 +288,4 @@ Questions remaining:
 - [CLAUDE.md](../CLAUDE.md) - AI assistant context
 - [ADRs](adr/README.md) - Architecture decisions
 - [SYNC-001](specs/SYNC-001-backend-patterns-integration.md) - Backend-patterns integration spec
+- [SYNC-002](specs/SYNC-002-client-architecture.md) - Client-side architecture spec

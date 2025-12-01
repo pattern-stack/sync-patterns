@@ -14,6 +14,8 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-002](002-sync-modes.md) | Sync Modes Definition | Accepted | 2025-11-29 |
 | [ADR-003](003-default-behaviors.md) | Default Behaviors | Accepted | 2025-11-29 |
 | [ADR-004](004-phased-implementation.md) | Phased Implementation | Accepted | 2025-11-29 |
+| [ADR-005](005-local-database-selection.md) | Local Database Selection | Accepted | 2025-12-01 |
+| [ADR-006](006-write-pattern-selection.md) | Write Pattern Selection | Accepted | 2025-12-01 |
 
 ## Status Definitions
 
