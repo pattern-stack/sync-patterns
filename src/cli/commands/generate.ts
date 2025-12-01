@@ -16,6 +16,10 @@ export interface GenerateOptions {
   schemas: boolean
   client: boolean
   hooks: boolean
+  apiUrl?: string
+  apiUrlEnv?: string
+  timeout?: string
+  authTokenKey?: string
   dryRun?: boolean
   verbose?: boolean
 }
@@ -110,7 +114,12 @@ export async function generateCommand(
     // Generate API client
     if (options.client) {
       console.log('\nGenerating API client...')
-      const client = generateAPIClient(parsed)
+      const client = generateAPIClient(parsed, {
+        baseUrl: options.apiUrl,
+        apiUrlEnvVar: options.apiUrlEnv || 'VITE_API_URL',
+        timeout: options.timeout ? parseInt(options.timeout, 10) : 10000,
+        authTokenKey: options.authTokenKey || 'auth_token',
+      })
 
       // Write client files
       const clientDir = join(options.output, 'client')

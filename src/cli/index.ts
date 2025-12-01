@@ -15,6 +15,7 @@ program
   .version('0.1.0')
 
 // Generate command
+// Defaults can be set via environment variables (SYNC_PATTERNS_*)
 program
   .command('generate')
   .description('Generate typed clients from OpenAPI specification')
@@ -23,6 +24,26 @@ program
   .option('--schemas', 'Generate Zod schemas (default: true)', true)
   .option('--client', 'Generate API client (default: true)', true)
   .option('--hooks', 'Generate React Query hooks (default: true)', true)
+  .option(
+    '--api-url <url>',
+    'Default API base URL for generated client',
+    process.env.SYNC_PATTERNS_API_URL
+  )
+  .option(
+    '--api-url-env <var>',
+    'Environment variable name for API URL',
+    process.env.SYNC_PATTERNS_API_URL_ENV || 'VITE_API_URL'
+  )
+  .option(
+    '--timeout <ms>',
+    'Default request timeout in milliseconds',
+    process.env.SYNC_PATTERNS_TIMEOUT || '10000'
+  )
+  .option(
+    '--auth-token-key <key>',
+    'localStorage key for auth token',
+    process.env.SYNC_PATTERNS_AUTH_TOKEN_KEY || 'auth_token'
+  )
   .option('--dry-run', 'Preview without writing files')
   .option('--verbose', 'Show detailed output')
   .action(generateCommand)

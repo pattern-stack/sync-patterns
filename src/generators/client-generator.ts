@@ -11,10 +11,12 @@ import type { ParsedOpenAPI, ParsedEndpoint, ParsedParameter } from './parser.js
 import { toClientMethodName, generateFallbackName, toCamelCase } from './naming.js'
 
 export interface ClientGeneratorOptions {
-  clientType: 'axios' | 'fetch'
+  clientType?: 'axios' | 'fetch'
   baseUrl?: string
+  apiUrlEnvVar?: string
   includeAuth?: boolean
   authType?: 'bearer' | 'apiKey' | 'basic'
+  authTokenKey?: string
   timeout?: number
   retries?: number
   includeInterceptors?: boolean
@@ -35,8 +37,10 @@ export class APIClientGenerator {
     this.options = {
       clientType: options.clientType || 'axios',
       baseUrl: options.baseUrl || '',
+      apiUrlEnvVar: options.apiUrlEnvVar || 'VITE_API_URL',
       includeAuth: options.includeAuth !== false,
       authType: options.authType || 'bearer',
+      authTokenKey: options.authTokenKey || 'auth_token',
       timeout: options.timeout || 10000,
       retries: options.retries || 3,
       includeInterceptors: options.includeInterceptors !== false,
@@ -634,11 +638,15 @@ export const defaultConfig: Partial<APIClientConfig> = {
   }
 
   private generateIndexFile(): string {
+    const envVar = this.options.apiUrlEnvVar
+    const fallbackUrl = this.options.baseUrl || '/api'
+    const authTokenKey = this.options.authTokenKey
+
     const authConfig = this.options.includeAuth && this.options.authType === 'bearer'
       ? `
-  // Read auth token from localStorage (Pattern Stack auth convention)
+  // Read auth token from localStorage
   getAuthToken: async () => {
-    return localStorage.getItem('auth_token') || undefined
+    return localStorage.getItem('${authTokenKey}') || undefined
   }`
       : ''
 
@@ -646,6 +654,11 @@ export const defaultConfig: Partial<APIClientConfig> = {
  * Generated API Client
  *
  * Auto-generated from OpenAPI specification
+ *
+ * Configuration:
+ *   - Set ${envVar} environment variable for API URL
+ *   - Default fallback: ${fallbackUrl}
+ *   - Auth token key: ${authTokenKey}
  */
 
 /// <reference types="vite/client" />
@@ -658,10 +671,16 @@ export * from './config.js'
 // Import createAPIClient explicitly for use below (export * doesn't hoist)
 import { createAPIClient } from './config.js'
 
+// Environment variable for API URL (works with Vite, Next.js, etc.)
+const API_URL = typeof import.meta !== 'undefined' && import.meta.env?.${envVar}
+  ? import.meta.env.${envVar}
+  : typeof process !== 'undefined' && process.env?.${envVar}
+    ? process.env.${envVar}
+    : '${fallbackUrl}'
+
 // Singleton instance for convenient usage
-// Uses Vite's import.meta.env for browser compatibility
 export const apiClient = createAPIClient({
-  baseUrl: import.meta.env?.VITE_API_URL || '${this.options.baseUrl || 'http://localhost:8000'}',
+  baseUrl: API_URL,
   timeout: ${this.options.timeout},
   defaultHeaders: {
     'Content-Type': 'application/json'
