@@ -634,27 +634,38 @@ export const defaultConfig: Partial<APIClientConfig> = {
   }
 
   private generateIndexFile(): string {
+    const authConfig = this.options.includeAuth && this.options.authType === 'bearer'
+      ? `
+  // Read auth token from localStorage (Pattern Stack auth convention)
+  getAuthToken: async () => {
+    return localStorage.getItem('auth_token') || undefined
+  }`
+      : ''
+
     return `/**
  * Generated API Client
  *
  * Auto-generated from OpenAPI specification
  */
 
+/// <reference types="vite/client" />
+
 export * from './client.js'
 export * from './methods.js'
 export * from './types.js'
 export * from './config.js'
 
-// Import createAPIClient explicitly for use below
+// Import createAPIClient explicitly for use below (export * doesn't hoist)
 import { createAPIClient } from './config.js'
 
-// Example client instance - configure with your API URL
+// Singleton instance for convenient usage
+// Uses Vite's import.meta.env for browser compatibility
 export const apiClient = createAPIClient({
-  baseUrl: process.env.API_URL || '${this.options.baseUrl || 'http://localhost:8080'}',
+  baseUrl: import.meta.env?.VITE_API_URL || '${this.options.baseUrl || 'http://localhost:8000'}',
   timeout: ${this.options.timeout},
   defaultHeaders: {
     'Content-Type': 'application/json'
-  }
+  },${authConfig}
 })`
   }
 
