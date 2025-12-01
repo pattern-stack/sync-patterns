@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted**
+**Accepted** (terminology updated 2025-12-01)
+
+> **Note**: This ADR originally used `push`/`live`/`cache` terminology from ADR-002, which has been superseded. See [TERMINOLOGY.md](../TERMINOLOGY.md) for current terms.
 
 ## Date
 
@@ -13,7 +15,7 @@
 sync-patterns has dependencies on:
 - **backend-patterns** - Must be stable enough to add sync annotations to models
 - **frontend-patterns** - Must be stable enough to integrate generated hooks
-- **Metrics layer** - Required for `cache` mode (doesn't exist yet)
+- **Metrics layer** - Required for cached/computed results mode (doesn't exist yet)
 
 Additionally, implementing all three sync modes simultaneously would be:
 - High risk (too many moving parts)
@@ -24,16 +26,16 @@ We need a phased approach that delivers value incrementally.
 
 ## Decision
 
-### Phase 1: `push` and `live` modes
+### Phase 1: Confirmed and Optimistic modes
 
 **Goal**: Enable basic sync functionality for CRUD operations
 
 **Deliverables**:
 1. CLI that reads OpenAPI spec with sync annotations
 2. TypeScript type generation
-3. `push` mode: TanStack Query hooks for direct API calls
-4. `live` mode: TanStack DB + ElectricSQL integration
-5. SQLite schema generation for `live` models
+3. Confirmed mode (`local_first: false`): TanStack Query hooks for direct API calls
+4. Optimistic mode (`local_first: true`): TanStack DB + ElectricSQL integration
+5. Unified entity wrappers that abstract the mode
 6. Documentation and examples
 
 **Prerequisites**:
@@ -43,16 +45,16 @@ We need a phased approach that delivers value incrementally.
 
 **Success Criteria**:
 - Can generate working hooks from annotated spec
-- `push` mode works with existing API
-- `live` mode syncs data between Postgres and client SQLite
+- Confirmed mode works with existing API
+- Optimistic mode syncs data between Postgres and client
 - At least one real project using it
 
-### Phase 2: `cache` mode
+### Phase 2: Cached/Computed Results
 
 **Goal**: Enable sync of pre-computed results from server cache
 
 **Deliverables**:
-1. `cache` mode hook generation
+1. Cached results generation (architecture TBD)
 2. Integration with backend-patterns caching layer (Redis)
 3. TTL and invalidation configuration
 4. Metrics layer integration
@@ -109,10 +111,10 @@ We explicitly do not commit to timelines. Each phase is complete when:
 - Higher risk, longer wait for any value
 - Harder to course-correct
 
-### Start with cache mode
+### Start with cached/computed mode
 - Addresses immediate client need (metrics)
 - More complex, requires metrics layer first
-- `push`/`live` are more foundational
+- Confirmed/optimistic modes are more foundational
 
 ## References
 

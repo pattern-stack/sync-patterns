@@ -2,7 +2,11 @@
 
 ## Status
 
-**Accepted**
+**Accepted** (terminology updated 2025-12-01)
+
+> **Note**: This ADR originally used `push`/`live`/`cache` terminology from ADR-002, which has been superseded. Current terminology:
+> - `local_first: false` → **Confirmed** (safe default)
+> - `local_first: true` → **Optimistic**
 
 ## Date
 
@@ -25,18 +29,18 @@ The guiding principle is **convention over configuration** - smart defaults with
 
 | Aspect | Default | Override |
 |--------|---------|----------|
-| **Sync mode** | `push` | `sync: live` or `sync: cache` on model |
+| **Sync mode** | `local_first: false` (confirmed) | `local_first: true` on Pattern |
 | **Conflict resolution** | Backend wins | Configurable per model (future) |
 | **Sync timing** | Immediate with retry | Configurable (future) |
-| **Fields synced** | All fields | `sync_exclude: [field_name]` |
+| **Fields synced** | All fields | `sync_exclude: true` on Field |
 | **Offline behavior** | Queue writes, sync when online | Configurable (future) |
 
 ### Rationale for Each Default
 
-#### Sync mode: `push`
+#### Sync mode: `local_first: false` (confirmed)
 - Safest default; no sync infrastructure required
 - Explicit opt-in to sync complexity
-- Teams can progressively adopt `live` mode
+- Teams can progressively adopt optimistic mode
 
 #### Conflict resolution: Backend wins
 - Backend-patterns is the source of truth
@@ -76,7 +80,7 @@ Lower levels override higher levels.
 - **Low barrier to entry**: Works without configuration
 - **Progressive complexity**: Simple cases stay simple, complex cases are possible
 - **Predictable**: Defaults are documented and consistent
-- **Safe**: Default to `push` means no accidental sync of sensitive data
+- **Safe**: Default to confirmed mode means no accidental optimistic sync of sensitive data
 
 ### Negative
 
@@ -95,7 +99,7 @@ Lower levels override higher levels.
 - Higher barrier to entry
 - Doesn't fit "slots easily" goal
 
-### Default to `live` mode
+### Default to `local_first: true` (optimistic)
 - More exciting out of the box
 - Dangerous - could sync sensitive data accidentally
 - Requires sync infrastructure from day one

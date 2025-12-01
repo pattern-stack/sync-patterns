@@ -53,7 +53,7 @@ Frontend-patterns (React + SQLite)
 - **Familiar DX**: TanStack ecosystem is widely adopted
 - **First-class integration**: ElectricSQL and TanStack DB have active collaboration
 - **Works with existing Postgres**: No backend database migration required
-- **Future-proof**: Can start with `push` mode (API calls) and upgrade to `live` mode (sync) per-model
+- **Future-proof**: Can start with confirmed mode (`local_first: false`) and upgrade to optimistic mode (`local_first: true`) per-entity
 
 ### Negative
 

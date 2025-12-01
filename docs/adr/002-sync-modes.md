@@ -2,7 +2,18 @@
 
 ## Status
 
-**Accepted**
+**Superseded**
+
+> **Note (2025-12-01)**: The three-mode system (`push`/`live`/`cache`) described in this ADR was simplified to a single boolean `local_first` configuration:
+>
+> | Config | Behavior | Description |
+> |--------|----------|-------------|
+> | `local_first: true` | **Optimistic** | Write to local, sync later, UI instant |
+> | `local_first: false` | **Confirmed** | Write to local, wait for server |
+>
+> The `cache` mode is deferred to Phase 2+. See [PLAN.md](../PLAN.md) for current implementation.
+>
+> **Do NOT use**: `push`, `sync`, `live`, `cache` - these terms are deprecated.
 
 ## Date
 

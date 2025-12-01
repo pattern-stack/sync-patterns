@@ -10,6 +10,7 @@
 | **Created** | 2025-11-30 |
 | **Phase** | 1 |
 | **Depends On** | None (foundational) |
+| **See Also** | [SYNC-004](SYNC-004-unified-entity-generation.md), [ADR-007](../adr/007-unified-entity-wrappers.md) |
 
 ---
 
@@ -27,9 +28,9 @@ This specification covers migrating the OpenAPI code generation system from fron
 
 ### Non-Goals
 
-- Implementing `live` mode (ElectricSQL integration) - future spec
-- SQLite/PGlite schema generation - covered in SYNC-002
-- TanStack DB collection generation - covered in SYNC-002
+- TanStack DB collection generation - covered in [SYNC-002](SYNC-002-client-architecture.md)
+- Unified entity wrapper generation - covered in [SYNC-004](SYNC-004-unified-entity-generation.md)
+- Runtime config generation - covered in [SYNC-004](SYNC-004-unified-entity-generation.md)
 
 ---
 
@@ -125,19 +126,24 @@ sync-patterns/
 
 ```
 src/generated/
-├── schemas/
-│   ├── contact.schema.ts       # Zod schemas + inferred types
-│   ├── account.schema.ts
+├── schemas/                    # Zod schemas (all entities)
+│   ├── contact.schema.ts
 │   └── index.ts
-├── client/
+├── client/                     # API client (all entities)
 │   ├── client.ts
-│   ├── methods.ts
+│   ├── contact.ts
 │   └── index.ts
-├── hooks/
-│   ├── queries.ts
-│   ├── mutations.ts
+├── hooks/                      # TanStack Query hooks (all entities)
+│   ├── contact.ts
 │   ├── keys.ts
 │   └── index.ts
+├── collections/                # TanStack DB (local_first: true only) - see SYNC-002
+│   ├── contact.ts
+│   └── index.ts
+├── entities/                   # Unified wrappers (all entities) - see SYNC-004
+│   ├── contact.ts
+│   └── index.ts
+├── config.ts                   # Runtime configuration - see SYNC-004
 └── index.ts
 ```
 
@@ -367,9 +373,9 @@ export function useContact(id: string) {
 
 ## Open Questions
 
-1. **Keep separate TypeScript generator?** - Could derive all types from Zod, or keep both generators
-2. **x-sync extension parsing** - When to add? This spec or separate?
-3. **Monorepo structure** - Should sync-patterns CLI be a separate npm package?
+1. ~~**Keep separate TypeScript generator?**~~ - Resolved: Derive types from Zod via `z.infer<>`
+2. ~~**x-sync extension parsing**~~ - Resolved: Covered in SYNC-004
+3. ~~**Monorepo structure**~~ - Resolved: sync-patterns is separate npm package
 
 ---
 
@@ -377,8 +383,10 @@ export function useContact(id: string) {
 
 - [SYNC-001: Backend-Patterns Integration](SYNC-001-backend-patterns-integration.md)
 - [SYNC-002: Client-Side Architecture](SYNC-002-client-architecture.md)
+- [SYNC-004: Unified Entity Generation](SYNC-004-unified-entity-generation.md)
 - [ADR-001: Sync Stack Selection](../adr/001-sync-stack-selection.md)
-- [frontend-patterns Hook Generation Guide](../../frontend-patterns/docs/guides/HOOK_GENERATION_GUIDE.md)
+- [ADR-007: Unified Entity Wrappers](../adr/007-unified-entity-wrappers.md)
+- [docs/TERMINOLOGY.md](../TERMINOLOGY.md)
 
 ---
 
