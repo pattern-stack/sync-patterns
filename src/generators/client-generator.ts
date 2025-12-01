@@ -645,8 +645,8 @@ export const defaultConfig: Partial<APIClientConfig> = {
     const authConfig = this.options.includeAuth && this.options.authType === 'bearer'
       ? `
   // Read auth token from localStorage
-  getAuthToken: async () => {
-    return localStorage.getItem('${authTokenKey}') || undefined
+  getAuthToken: () => {
+    return localStorage.getItem('${authTokenKey}')
   }`
       : ''
 
@@ -671,12 +671,18 @@ export * from './config.js'
 // Import createAPIClient explicitly for use below (export * doesn't hoist)
 import { createAPIClient } from './config.js'
 
-// Environment variable for API URL (works with Vite, Next.js, etc.)
-const API_URL = typeof import.meta !== 'undefined' && import.meta.env?.${envVar}
-  ? import.meta.env.${envVar}
-  : typeof process !== 'undefined' && process.env?.${envVar}
-    ? process.env.${envVar}
-    : '${fallbackUrl}'
+// Environment variable for API URL (works with Vite, Next.js, CRA, etc.)
+// Vite uses import.meta.env, Next.js/CRA use process.env (bundler replaces at build time)
+function getApiUrl(): string {
+  // Vite environment
+  if (typeof import.meta !== 'undefined' && import.meta.env?.${envVar}) {
+    return import.meta.env.${envVar}
+  }
+  // Fallback URL
+  return '${fallbackUrl}'
+}
+
+const API_URL = getApiUrl()
 
 // Singleton instance for convenient usage
 export const apiClient = createAPIClient({

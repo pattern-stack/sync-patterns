@@ -265,6 +265,7 @@ export class ReactHookGenerator {
 
     lines.push('/**')
     lines.push(` * Infinite query version of ${baseHookName}`)
+    lines.push(' * @deprecated Consider using regular pagination with useQuery instead')
     lines.push(' */')
 
     const paramType = this.generateParamType(endpoint)
@@ -279,32 +280,38 @@ export class ReactHookGenerator {
     // Determine if the query key function requires params
     const keyNeedsParams = this.hasRequiredParams(endpoint)
 
-    // TanStack Query v5 signature: UseInfiniteQueryOptions<TQueryFnData, TError, TData, TQueryData, TQueryKey>
-    // TQueryKey must be readonly unknown[]
+    // TanStack Query v5 signature: UseInfiniteQueryOptions<TQueryFnData, TError, TData, TQueryKey, TPageParam>
+    // Using 'unknown' for data types and 'number' for page param
     lines.push(
-      `export function ${hookName}(params: ${paramType}, options?: UseInfiniteQueryOptions<unknown, unknown, unknown, unknown, readonly unknown[]>) {`,
+      `export function ${hookName}(params: ${paramType}, options?: Omit<UseInfiniteQueryOptions<unknown, Error, unknown, readonly unknown[], number>, 'queryKey' | 'queryFn' | 'initialPageParam' | 'getNextPageParam'>) {`,
     )
     lines.push('  return useInfiniteQuery({')
     // If the query key needs params, pass them; otherwise, spread into the array
     if (keyNeedsParams) {
       lines.push(
-        `    queryKey: [...queryKeys.${queryKeyNameCamelCase}(params), 'infinite'],`,
+        `    queryKey: [...queryKeys.${queryKeyNameCamelCase}(params), 'infinite'] as const,`,
       )
     } else {
-      lines.push(`    queryKey: [...queryKeys.${queryKeyNameCamelCase}(), params],`)
+      lines.push(`    queryKey: [...queryKeys.${queryKeyNameCamelCase}(), params] as const,`)
     }
     lines.push(
-      `    queryFn: ({ pageParam = 1 }) => apiClient.${this.camelCase(operationName)}({ ...params, page: pageParam }),`,
+      `    queryFn: ({ pageParam }) => apiClient.${this.camelCase(operationName)}({ ...params, page: pageParam }),`,
     )
-    lines.push('    getNextPageParam: (lastPage, allPages) => {')
+    lines.push('    initialPageParam: 1,')
+    lines.push('    getNextPageParam: (lastPage, _allPages, lastPageParam) => {')
     lines.push(
-      '      // Implement pagination logic based on your API response structure',
+      '      // Default pagination: check for items array and compare to limit',
     )
     lines.push(
-      '      return lastPage?.hasNextPage ? allPages.length + 1 : undefined',
+      '      const page = lastPage as { items?: unknown[]; total?: number } | null',
+    )
+    lines.push(
+      '      const hasMore = page?.items && page.items.length > 0 && (page.total === undefined || page.items.length >= (params as { limit?: number }).limit!)',
+    )
+    lines.push(
+      '      return hasMore ? lastPageParam + 1 : undefined',
     )
     lines.push('    },')
-    lines.push('    initialPageParam: 1,')
     lines.push('    ...options')
     lines.push('  })')
     lines.push('}')

@@ -228,7 +228,7 @@ export class ZodSchemaGenerator {
 
   private generateObjectZod(schema: ParsedSchema, indent: number, referencedSchemas?: Set<string>): string {
     if (!schema.properties) {
-      return this.addNullable('z.record(z.unknown())', schema.nullable)
+      return this.addNullable('z.record(z.string(), z.unknown())', schema.nullable)
     }
 
     const spaces = '  '.repeat(indent)

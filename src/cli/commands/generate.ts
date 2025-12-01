@@ -152,6 +152,38 @@ export async function generateCommand(
       console.log(`Written React hooks to ${hooksDir}/`)
     }
 
+    // Generate root index and types re-export
+    console.log('\nGenerating root index...')
+
+    const rootIndex = `/**
+ * Generated API Client & Types
+ *
+ * Auto-generated from OpenAPI specification
+ * Do not edit manually - regenerate using sync-patterns CLI
+ */
+
+// Re-export all schemas/types
+export * from './schemas/index.js'
+
+// Re-export API client
+export * from './client/index.js'
+
+// Re-export React hooks
+export * from './hooks/index.js'
+`
+    await writeFile(join(options.output, 'index.ts'), rootIndex)
+
+    // Generate a types.ts alias for backward compatibility
+    const typesAlias = `/**
+ * Type Re-exports
+ *
+ * Convenience re-export of all schema types
+ */
+
+export * from './schemas/index.js'
+`
+    await writeFile(join(options.output, 'types.ts'), typesAlias)
+
     console.log('\n✅ Generation complete!')
     console.log(`📦 Generated files in: ${options.output}`)
   } catch (error) {
