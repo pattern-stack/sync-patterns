@@ -1,7 +1,7 @@
 # sync-patterns: Working Plan
 
-> **Last Updated**: 2025-12-01
-> **Status**: Planning Phase
+> **Last Updated**: 2025-11-30
+> **Status**: Phase 1 In Progress
 
 This is a living document that captures the current state of planning for sync-patterns. It will be updated as decisions are made and implementation progresses.
 
@@ -104,15 +104,33 @@ Electric syncs from Postgres
 Cleanup trigger removes from _local
 ```
 
-### Generated Output
+### Generated Output (Current)
 
 ```
 src/generated/
-├── db/init.ts              # Database initialization
-├── schema/*.sql            # PGlite schemas
+├── schemas/                # Zod schemas with runtime validation ✅
+│   ├── {entity}.schema.ts  # Schema + Create/Update variants + helpers
+│   └── index.ts
+├── client/                 # API client ✅
+│   ├── client.ts           # Axios-based client
+│   ├── methods.ts          # Typed API methods
+│   └── index.ts
+├── hooks/                  # React Query hooks ✅
+│   ├── queries.ts          # useQuery hooks
+│   ├── mutations.ts        # useMutation hooks
+│   ├── keys.ts             # Query key factory
+│   └── index.ts
+└── index.ts
+```
+
+### Generated Output (Future - TanStack DB)
+
+```
+src/generated/
+├── db/init.ts              # PGlite initialization
+├── schema/*.sql            # PGlite schemas (synced/local/view)
 ├── collections/*.ts        # TanStack DB collections
-├── types/*.ts              # TypeScript interfaces
-└── index.ts                # Re-exports
+└── ...                     # Current output above
 ```
 
 ---
@@ -195,7 +213,16 @@ components:
 
 ### Phase 1: Metadata Foundation (Current Target)
 
-**Backend-Patterns Changes:**
+**sync-patterns CLI:** ✅ Complete
+- [x] OpenAPI parser with `x-sync` extension support ([SYNC-003](specs/SYNC-003-codegen-migration.md))
+- [x] Zod schema generator with runtime validation
+- [x] Cross-schema import resolution
+- [x] API client generator (axios-based)
+- [x] React Query hook generator (queries + mutations)
+- [x] CLI: `sync-patterns generate <spec> --output <dir>`
+- [x] Tested against DealBrain API (30 endpoints, 39 schemas)
+
+**Backend-Patterns Changes:** (Not started)
 - [x] Design spec complete ([SYNC-001](specs/SYNC-001-backend-patterns-integration.md))
 - [ ] Add `local_first` to Pattern config with validation
 - [ ] Add `sync_exclude` to Field class
@@ -204,12 +231,12 @@ components:
 - [ ] Custom OpenAPI schema hook for `x-sync` and `x-rbac` extensions
 - [ ] Documentation
 
-**sync-patterns CLI:**
-- [ ] Read OpenAPI spec with `x-sync` extensions
-- [ ] Generate TypeScript types
-- [ ] Generate optimistic mutation hooks (`local_first=True`)
-- [ ] Generate confirmed mutation hooks (`local_first=False`)
-- [ ] Generate SQLite schema for synced models
+**TanStack DB Integration:** (Not started)
+- [ ] PGlite schema generator (`{entity}_synced`, `{entity}_local`, view, triggers)
+- [ ] TanStack DB collection generator with Electric integration
+- [ ] Sync worker for background API sync
+- [ ] Write mode support (`local_first=true` vs `local_first=false`)
+- [ ] Electric shape configuration
 - [ ] Integration test with finance_tracker
 
 ### Phase 2: RBAC Enforcement (Future)
@@ -271,6 +298,7 @@ Questions remaining:
 | 2025-11-29 | Initial planning session; core decisions made (ADR-001 through ADR-004) |
 | 2025-11-29 | Backend-patterns integration review; SYNC-001 spec drafted |
 | 2025-12-01 | Client-side architecture decisions; ADR-005, ADR-006, SYNC-002 drafted |
+| 2025-11-30 | CLI implementation complete; Zod schemas, API client, React hooks working |
 
 ---
 
@@ -289,3 +317,4 @@ Questions remaining:
 - [ADRs](adr/README.md) - Architecture decisions
 - [SYNC-001](specs/SYNC-001-backend-patterns-integration.md) - Backend-patterns integration spec
 - [SYNC-002](specs/SYNC-002-client-architecture.md) - Client-side architecture spec
+- [SYNC-003](specs/SYNC-003-codegen-migration.md) - Codegen migration and Zod integration
