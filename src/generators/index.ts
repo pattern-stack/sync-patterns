@@ -80,3 +80,27 @@ export {
   type BulkRetryConfig,
   type BulkMutationOptions,
 } from './bulk-types.js'
+
+// TanStack DB Collection Generator
+export {
+  CollectionGenerator,
+  generateCollections,
+  type GeneratedCollections,
+  type CollectionGeneratorOptions,
+} from './collection-generator.js'
+
+// Config Generator
+export {
+  ConfigGenerator,
+  generateConfig,
+  type GeneratedConfig,
+  type ConfigGeneratorOptions,
+} from './config-generator.js'
+
+// Entity Wrapper Generator
+export {
+  EntityGenerator,
+  generateEntityWrappers,
+  type GeneratedEntityWrappers,
+  type EntityGeneratorOptions,
+} from './entity-generator.js'

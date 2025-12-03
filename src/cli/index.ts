@@ -21,9 +21,14 @@ program
   .description('Generate typed clients from OpenAPI specification')
   .argument('<source>', 'OpenAPI specification (URL or file path)')
   .option('-o, --output <dir>', 'Output directory', './src/generated')
-  .option('--schemas', 'Generate Zod schemas (default: true)', true)
-  .option('--client', 'Generate API client (default: true)', true)
-  .option('--hooks', 'Generate React Query hooks (default: true)', true)
+  .option('--schemas [boolean]', 'Generate Zod schemas', true)
+  .option('--no-schemas', 'Skip Zod schema generation')
+  .option('--client [boolean]', 'Generate API client', true)
+  .option('--no-client', 'Skip API client generation')
+  .option('--hooks [boolean]', 'Generate React Query hooks', true)
+  .option('--no-hooks', 'Skip React Query hook generation')
+  .option('--collections', 'Generate TanStack DB collections', false)
+  .option('--entities', 'Generate unified entity wrappers', false)
   .option(
     '--api-url <url>',
     'Default API base URL for generated client',

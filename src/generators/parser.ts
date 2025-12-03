@@ -44,6 +44,9 @@ export interface ParsedEndpoint {
   // Sync extensions
   syncMode?: 'push' | 'live' | 'cache'
   localFirst?: boolean
+  syncConfig?: {
+    localFirst: boolean
+  }
 }
 
 export interface ParsedParameter {
@@ -186,6 +189,9 @@ export class OpenAPIParser {
           // Sync extensions
           syncMode: syncConfig?.mode as ParsedEndpoint['syncMode'],
           localFirst: syncConfig?.local_first as boolean | undefined,
+          syncConfig: syncConfig?.local_first !== undefined
+            ? { localFirst: syncConfig.local_first as boolean }
+            : undefined,
         })
       }
     }
