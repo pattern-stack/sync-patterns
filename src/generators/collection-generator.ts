@@ -141,7 +141,7 @@ export class CollectionGenerator {
     lines.push('      },')
     lines.push('    },')
     lines.push('')
-    lines.push('    getKey: (item) => item.id,')
+    lines.push('    getKey: (item) => (item as { id: string }).id,')
     lines.push('')
     lines.push('    // Mutation handlers - sync changes to server')
     lines.push('    onInsert: async ({ transaction }) => {')

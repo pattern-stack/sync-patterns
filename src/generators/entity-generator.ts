@@ -529,7 +529,7 @@ export class EntityGenerator {
     lines.push('  return {')
     lines.push(`    data: result.data as ${entityType}[] | undefined,`)
     lines.push('    isLoading: result.isLoading,')
-    lines.push('    error: result.error ?? null,')
+    lines.push('    error: (result.error as Error) ?? null,')
     lines.push('  }')
     lines.push('}')
 
@@ -570,9 +570,9 @@ export class EntityGenerator {
 
     lines.push(`  const result = hooks.${operation.hookName}({ ${paramName}: id })`)
     lines.push('  return {')
-    lines.push('    data: result.data,')
+    lines.push(`    data: result.data as ${entityType} | undefined,`)
     lines.push('    isLoading: result.isLoading,')
-    lines.push('    error: result.error ?? null,')
+    lines.push('    error: (result.error as Error) ?? null,')
     lines.push('  }')
     lines.push('}')
 
@@ -614,8 +614,8 @@ export class EntityGenerator {
 
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
-    lines.push('    mutate: mutation.mutate,')
-    lines.push('    mutateAsync: mutation.mutateAsync,')
+    lines.push(`    mutate: (data: ${createType}) => mutation.mutate(data as Record<string, unknown>),`)
+    lines.push(`    mutateAsync: async (data: ${createType}) => mutation.mutateAsync(data as Record<string, unknown>) as Promise<${entityType}>,`)
     lines.push('    isPending: mutation.isPending,')
     lines.push('  }')
     lines.push('}')
@@ -659,8 +659,8 @@ export class EntityGenerator {
 
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
-    lines.push(`    mutate: ({ id, data }) => mutation.mutate({ pathParams: { ${paramName}: id }, ...data }),`)
-    lines.push(`    mutateAsync: async ({ id, data }) => mutation.mutateAsync({ pathParams: { ${paramName}: id }, ...data }),`)
+    lines.push(`    mutate: ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutate({ pathParams: { ${paramName}: id }, ...data }),`)
+    lines.push(`    mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutateAsync({ pathParams: { ${paramName}: id }, ...data }) as Promise<${entityType}>,`)
     lines.push('    isPending: mutation.isPending,')
     lines.push('  }')
     lines.push('}')
@@ -701,8 +701,8 @@ export class EntityGenerator {
 
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
-    lines.push(`    mutate: (id) => mutation.mutate({ pathParams: { ${paramName}: id } }),`)
-    lines.push(`    mutateAsync: async (id) => mutation.mutateAsync({ pathParams: { ${paramName}: id } }),`)
+    lines.push(`    mutate: (id: string) => mutation.mutate({ pathParams: { ${paramName}: id } }),`)
+    lines.push(`    mutateAsync: async (id: string) => { await mutation.mutateAsync({ pathParams: { ${paramName}: id } }) },`)
     lines.push('    isPending: mutation.isPending,')
     lines.push('  }')
     lines.push('}')
