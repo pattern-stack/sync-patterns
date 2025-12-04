@@ -121,3 +121,11 @@ export {
   type GeneratedRxDBInit,
   type RxDBInitGeneratorOptions,
 } from './rxdb-init-generator.js'
+
+// Sync Provider Generator (for offline mode)
+export {
+  SyncProviderGenerator,
+  generateSyncProvider,
+  type GeneratedSyncProvider,
+  type SyncProviderGeneratorOptions,
+} from './sync-provider-generator.js'
