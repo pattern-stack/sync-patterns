@@ -1,7 +1,7 @@
 /**
  * Entity Generator Tests
  *
- * Tests for unified entity wrapper code generation.
+ * Tests for unified entity wrapper code generation with 3-mode sync support.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -44,14 +44,105 @@ describe('EntityGenerator', () => {
       expect(result.wrappers.has('contacts')).toBe(true)
     })
 
-    it('should generate list hook (useContacts)', () => {
+    it('should use getSyncMode instead of isLocalFirst', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts',
             method: 'get',
             operationId: 'list_contacts',
-            localFirst: true,
+            syncMode: 'realtime',
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain("import { getSyncMode } from '../config'")
+      expect(contactsCode).toContain("import type { SyncMode } from '../config'")
+      expect(contactsCode).toContain("const mode = getSyncMode('contacts')")
+      expect(contactsCode).not.toContain('isLocalFirst')
+    })
+
+    it('should import realtime collection for syncMode: realtime', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'realtime',
+            responses: [],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain("import { contactsRealtimeCollection } from '../collections/contacts.realtime'")
+      expect(contactsCode).not.toContain('contactsOfflineCollection')
+    })
+
+    it('should import offline collection for syncMode: offline', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'offline',
+            responses: [],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain("import { contactsOfflineCollection } from '../collections/contacts.offline'")
+      expect(contactsCode).not.toContain('contactsRealtimeCollection')
+    })
+
+    it('should not import any collection for syncMode: api', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'api',
+            responses: [],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).not.toContain('contactsRealtimeCollection')
+      expect(contactsCode).not.toContain('contactsOfflineCollection')
+      expect(contactsCode).not.toContain('useLiveQuery')
+      expect(contactsCode).not.toContain('getSyncMode')
+    })
+
+    it('should generate 3-mode switch in list hook for realtime', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'realtime',
             responses: [{
               statusCode: '200',
               content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
@@ -65,19 +156,46 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain('export function useContacts()')
-      expect(contactsCode).toContain("if (isLocalFirst('contacts'))")
+      expect(contactsCode).toContain("const mode = getSyncMode('contacts')")
+      expect(contactsCode).toContain("if (mode === 'realtime')")
       expect(contactsCode).toContain('useLiveQuery')
-      expect(contactsCode).toContain('q.from({ item: contactsCollection })')
+      expect(contactsCode).toContain('q.from({ item: contactsRealtimeCollection })')
+      expect(contactsCode).toContain('// api mode - use TanStack Query')
     })
 
-    it('should generate get hook (useContact)', () => {
+    it('should generate 3-mode switch in list hook for offline', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'offline',
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain('export function useContacts()')
+      expect(contactsCode).toContain("if (mode === 'offline')")
+      expect(contactsCode).toContain('q.from({ item: contactsOfflineCollection })')
+    })
+
+    it('should generate 3-mode switch in get hook', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts/{id}',
             method: 'get',
             operationId: 'get_contact',
-            localFirst: true,
+            syncMode: 'realtime',
             responses: [{
               statusCode: '200',
               content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
@@ -91,17 +209,19 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain('export function useContact(id: string)')
+      expect(contactsCode).toContain("if (mode === 'realtime')")
       expect(contactsCode).toContain('.where(({ item }) => eq(item.id, id))')
+      expect(contactsCode).toContain('q.from({ item: contactsRealtimeCollection })')
     })
 
-    it('should generate create hook (useCreateContact)', () => {
+    it('should generate 3-mode mutation for create hook', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts',
             method: 'post',
             operationId: 'create_contact',
-            localFirst: true,
+            syncMode: 'realtime',
             requestBody: {
               required: true,
               content: { 'application/json': { schema: { ref: '#/components/schemas/ContactCreate' } } },
@@ -122,18 +242,83 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain('export function useCreateContact()')
-      expect(contactsCode).toContain('contactsCollection.insert(data')
-      expect(contactsCode).toContain('// TanStack DB mutations are optimistic')
+      expect(contactsCode).toContain("if (mode === 'realtime')")
+      expect(contactsCode).toContain('contactsRealtimeCollection.insert')
+      expect(contactsCode).toContain('crypto.randomUUID()')
+      expect(contactsCode).toContain('isPending: false, // Optimistic - always instant')
     })
 
-    it('should generate update hook (useUpdateContact)', () => {
+    it('should handle backward compat localFirst: true as realtime', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            localFirst: true,
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      // localFirst: true should be treated as realtime mode
+      expect(contactsCode).toContain("if (mode === 'realtime')")
+      expect(contactsCode).toContain('contactsRealtimeCollection')
+      expect(contactsCode).toContain("import { getSyncMode } from '../config'")
+    })
+
+    it('should use correct collection name suffix (Realtime/Offline)', () => {
+      const parsedAPIRealtime = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'realtime',
+            responses: [],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const parsedAPIOffline = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/drafts',
+            method: 'get',
+            operationId: 'list_drafts',
+            syncMode: 'offline',
+            responses: [],
+          }),
+        ],
+        schemas: [{ name: 'Draft', properties: [], type: 'object' }],
+      })
+
+      const resultRealtime = generateEntityWrappers(parsedAPIRealtime)
+      const resultOffline = generateEntityWrappers(parsedAPIOffline)
+
+      const contactsCode = resultRealtime.wrappers.get('contacts')!
+      const draftsCode = resultOffline.wrappers.get('drafts')!
+
+      expect(contactsCode).toContain('contactsRealtimeCollection')
+      expect(draftsCode).toContain('draftsOfflineCollection')
+    })
+
+    it('should generate update hook with correct collection', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts/{id}',
             method: 'patch',
             operationId: 'update_contact',
-            localFirst: true,
+            syncMode: 'realtime',
             requestBody: {
               required: true,
               content: { 'application/json': { schema: { ref: '#/components/schemas/ContactUpdate' } } },
@@ -154,17 +339,18 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain('export function useUpdateContact()')
-      expect(contactsCode).toContain('contactsCollection.update(id, (draft) => Object.assign(draft, data))')
+      expect(contactsCode).toContain('contactsRealtimeCollection.update')
+      expect(contactsCode).toContain('updated_at: new Date().toISOString()')
     })
 
-    it('should generate delete hook (useDeleteContact)', () => {
+    it('should generate delete hook with correct collection', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts/{id}',
             method: 'delete',
             operationId: 'delete_contact',
-            localFirst: true,
+            syncMode: 'realtime',
             responses: [{ statusCode: '204' }],
           }),
         ],
@@ -175,17 +361,17 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain('export function useDeleteContact()')
-      expect(contactsCode).toContain('contactsCollection.delete(id)')
+      expect(contactsCode).toContain('contactsRealtimeCollection.delete(id)')
     })
 
-    it('should import correct TanStack DB packages', () => {
+    it('should import correct TanStack DB packages for realtime mode', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
             path: '/contacts',
             method: 'get',
             operationId: 'list_contacts',
-            localFirst: true,
+            syncMode: 'realtime',
             responses: [],
           }),
         ],
@@ -284,7 +470,31 @@ describe('EntityGenerator', () => {
   })
 
   describe('fallback to Query hooks', () => {
-    it('should use Query hooks when not local_first', () => {
+    it('should use Query hooks when syncMode is api', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'api',
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain('hooks.useListContacts()')
+      expect(contactsCode).not.toContain('useLiveQuery')
+    })
+
+    it('should use Query hooks when localFirst is false (backward compat)', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
@@ -306,6 +516,30 @@ describe('EntityGenerator', () => {
 
       expect(contactsCode).toContain('hooks.useListContacts()')
       expect(contactsCode).not.toContain('useLiveQuery')
+    })
+
+    it('should default to api mode when no syncMode or localFirst specified', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      expect(contactsCode).toContain('hooks.useListContacts()')
+      expect(contactsCode).not.toContain('useLiveQuery')
+      expect(contactsCode).not.toContain('getSyncMode')
     })
   })
 })

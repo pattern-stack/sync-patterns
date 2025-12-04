@@ -43,6 +43,18 @@ export class ConfigGenerator {
     // Extract entity configurations
     const entityConfigs = this.extractEntityConfigs(endpoints)
 
+    // SyncMode type
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Sync mode determines how data is synchronized')
+      lines.push(' * - api: Server-only, uses TanStack Query (no local storage)')
+      lines.push(' * - realtime: ElectricSQL + TanStack DB (in-memory, sub-ms reactivity)')
+      lines.push(' * - offline: RxDB + IndexedDB (persistent, survives refresh)')
+      lines.push(' */')
+    }
+    lines.push("export type SyncMode = 'api' | 'realtime' | 'offline'")
+    lines.push('')
+
     // Type definition
     if (this.options.includeJSDoc) {
       lines.push('/**')
@@ -56,10 +68,10 @@ export class ConfigGenerator {
     lines.push('  apiUrl: string')
     lines.push('  /** Key for auth token in localStorage */')
     lines.push('  authTokenKey: string')
-    lines.push('  /** Default local-first behavior for entities not explicitly configured */')
-    lines.push('  defaultLocalFirst: boolean')
-    lines.push('  /** Per-entity local-first configuration */')
-    lines.push('  entities: Record<string, boolean>')
+    lines.push('  /** Default sync mode for entities not explicitly configured */')
+    lines.push('  defaultSyncMode: SyncMode')
+    lines.push('  /** Per-entity sync mode configuration */')
+    lines.push('  entities: Record<string, SyncMode>')
     lines.push('}')
     lines.push('')
 
@@ -74,15 +86,15 @@ export class ConfigGenerator {
     lines.push("  electricUrl: '',")
     lines.push("  apiUrl: import.meta.env?.VITE_API_URL ?? '/api/v1',")
     lines.push("  authTokenKey: 'auth_token',")
-    lines.push('  defaultLocalFirst: false,')
+    lines.push("  defaultSyncMode: 'api',")
     lines.push('  entities: {')
 
     // Add entity configurations
     const sortedEntities = Object.entries(entityConfigs).sort((a, b) =>
       a[0].localeCompare(b[0])
     )
-    for (const [entityName, localFirst] of sortedEntities) {
-      lines.push(`    ${entityName}: ${localFirst},`)
+    for (const [entityName, syncMode] of sortedEntities) {
+      lines.push(`    ${entityName}: '${syncMode}',`)
     }
 
     lines.push('  },')
@@ -100,10 +112,11 @@ export class ConfigGenerator {
       lines.push(' *')
       lines.push(' * configureSync({')
       lines.push(' *   electricUrl: "https://electric.example.com",')
-      lines.push(' *   defaultLocalFirst: true,')
+      lines.push(" *   defaultSyncMode: 'realtime',")
       lines.push(' *   entities: {')
-      lines.push(' *     contacts: true,  // Override to enable local-first')
-      lines.push(' *     analytics: false // Override to disable local-first')
+      lines.push(" *     contacts: 'realtime',  // ElectricSQL sync")
+      lines.push(" *     drafts: 'offline',     // RxDB persistent storage")
+      lines.push(" *     analytics: 'api'       // Server-only")
       lines.push(' *   }')
       lines.push(' * })')
       lines.push(' * ```')
@@ -121,17 +134,33 @@ export class ConfigGenerator {
     lines.push('}')
     lines.push('')
 
-    // isLocalFirst function
+    // getSyncMode function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the sync mode for an entity')
+      lines.push(' *')
+      lines.push(' * @param entity Entity name (e.g., "contacts", "accounts")')
+      lines.push(" * @returns Sync mode: 'api', 'realtime', or 'offline'")
+      lines.push(' */')
+    }
+    lines.push('export function getSyncMode(entity: string): SyncMode {')
+    lines.push('  return config.entities[entity] ?? config.defaultSyncMode')
+    lines.push('}')
+    lines.push('')
+
+    // isLocalFirst function (backward compatibility)
     if (this.options.includeJSDoc) {
       lines.push('/**')
       lines.push(' * Check if an entity is configured for local-first mode')
+      lines.push(' * @deprecated Use getSyncMode() instead for 3-mode support')
       lines.push(' *')
       lines.push(' * @param entity Entity name (e.g., "contacts", "accounts")')
-      lines.push(' * @returns true if entity uses local-first (optimistic) mode')
+      lines.push(" * @returns true if entity uses realtime or offline mode")
       lines.push(' */')
     }
     lines.push('export function isLocalFirst(entity: string): boolean {')
-    lines.push('  return config.entities[entity] ?? config.defaultLocalFirst')
+    lines.push("  const mode = getSyncMode(entity)")
+    lines.push("  return mode === 'realtime' || mode === 'offline'")
     lines.push('}')
     lines.push('')
 
@@ -200,23 +229,40 @@ export class ConfigGenerator {
   /**
    * Extract entity configurations from endpoints
    */
-  private extractEntityConfigs(endpoints: ParsedEndpoint[]): Record<string, boolean> {
-    const configs: Record<string, boolean> = {}
+  private extractEntityConfigs(endpoints: ParsedEndpoint[]): Record<string, 'api' | 'realtime' | 'offline'> {
+    const configs: Record<string, 'api' | 'realtime' | 'offline'> = {}
 
     for (const endpoint of endpoints) {
-      // Only process endpoints with explicit local_first configuration
-      if (endpoint.localFirst !== undefined) {
+      const syncMode = this.getSyncMode(endpoint)
+      if (syncMode) {
         const entityName = this.extractEntityName(endpoint.path)
         if (entityName) {
           // Only set if not already configured (first endpoint wins)
           if (!(entityName in configs)) {
-            configs[entityName] = endpoint.localFirst
+            configs[entityName] = syncMode
           }
         }
       }
     }
 
     return configs
+  }
+
+  /**
+   * Get sync mode from endpoint with backward compatibility
+   */
+  private getSyncMode(endpoint: ParsedEndpoint): 'api' | 'realtime' | 'offline' | undefined {
+    // New format: explicit syncMode
+    if (endpoint.syncMode === 'offline') return 'offline'
+    if (endpoint.syncMode === 'realtime') return 'realtime'
+    if (endpoint.syncMode === 'api') return 'api'
+
+    // Legacy format: localFirst boolean
+    // local_first: true → 'realtime' (backward compat)
+    if (endpoint.localFirst === true) return 'realtime'
+    if (endpoint.localFirst === false) return 'api'
+
+    return undefined
   }
 
   /**

@@ -9,8 +9,10 @@
 import type { ParsedOpenAPI, ParsedEndpoint } from './parser.js'
 
 export interface GeneratedCollections {
-  /** Map of entity name to collection code */
-  collections: Map<string, string>
+  /** Map of entity name to realtime collection code (ElectricSQL) */
+  realtimeCollections: Map<string, string>
+  /** Map of entity name to offline collection code (RxDB) */
+  offlineCollections: Map<string, string>
   /** Combined index file */
   index: string
 }
@@ -32,42 +34,68 @@ export class CollectionGenerator {
   }
 
   generate(parsedAPI: ParsedOpenAPI): GeneratedCollections {
-    const collections = new Map<string, string>()
+    const realtimeCollections = new Map<string, string>()
+    const offlineCollections = new Map<string, string>()
 
-    // Find all entities with local_first: true
-    const localFirstEntities = this.extractLocalFirstEntities(parsedAPI.endpoints)
+    // Extract entities by sync mode
+    const { realtimeEntities, offlineEntities } = this.extractEntitiesBySyncMode(parsedAPI.endpoints)
 
-    for (const [entityName, endpoint] of Object.entries(localFirstEntities)) {
-      const code = this.generateCollectionFile(entityName, endpoint)
-      collections.set(entityName, code)
+    // Generate realtime collections (ElectricSQL)
+    for (const [entityName, endpoint] of Object.entries(realtimeEntities)) {
+      const code = this.generateRealtimeCollectionFile(entityName, endpoint)
+      realtimeCollections.set(entityName, code)
+    }
+
+    // Generate offline collections (RxDB)
+    for (const [entityName, endpoint] of Object.entries(offlineEntities)) {
+      const code = this.generateOfflineCollectionFile(entityName, endpoint)
+      offlineCollections.set(entityName, code)
     }
 
     // Generate index file
-    const index = this.generateIndexFile(Array.from(collections.keys()))
+    const index = this.generateIndexFile(
+      Array.from(realtimeCollections.keys()),
+      Array.from(offlineCollections.keys())
+    )
 
-    return { collections, index }
+    return { realtimeCollections, offlineCollections, index }
   }
 
   /**
-   * Extract entities that have local_first: true from endpoints
+   * Get sync mode from endpoint with backward compatibility
    */
-  private extractLocalFirstEntities(
+  private getSyncMode(endpoint: ParsedEndpoint): 'api' | 'realtime' | 'offline' {
+    if (endpoint.syncMode === 'offline') return 'offline'
+    if (endpoint.syncMode === 'realtime') return 'realtime'
+    if (endpoint.syncMode === 'api') return 'api'
+    if (endpoint.localFirst === true) return 'realtime' // backward compat
+    return 'api'
+  }
+
+  /**
+   * Extract entities by sync mode from endpoints
+   */
+  private extractEntitiesBySyncMode(
     endpoints: ParsedEndpoint[]
-  ): Record<string, ParsedEndpoint> {
-    const entities: Record<string, ParsedEndpoint> = {}
+  ): { realtimeEntities: Record<string, ParsedEndpoint>; offlineEntities: Record<string, ParsedEndpoint> } {
+    const realtimeEntities: Record<string, ParsedEndpoint> = {}
+    const offlineEntities: Record<string, ParsedEndpoint> = {}
 
     for (const endpoint of endpoints) {
-      // Check if endpoint has local_first: true
-      if (endpoint.localFirst === true) {
-        // Extract entity name from path (e.g., /contacts -> contacts)
-        const entityName = this.extractEntityName(endpoint.path)
-        if (entityName && !entities[entityName]) {
-          entities[entityName] = endpoint
-        }
+      const syncMode = this.getSyncMode(endpoint)
+      const entityName = this.extractEntityName(endpoint.path)
+
+      if (!entityName) continue
+
+      if (syncMode === 'realtime' && !realtimeEntities[entityName]) {
+        realtimeEntities[entityName] = endpoint
+      } else if (syncMode === 'offline' && !offlineEntities[entityName]) {
+        offlineEntities[entityName] = endpoint
       }
+      // syncMode === 'api' - no collection generated
     }
 
-    return entities
+    return { realtimeEntities, offlineEntities }
   }
 
   /**
@@ -92,14 +120,16 @@ export class CollectionGenerator {
     return resourceSegment || null
   }
 
-  private generateCollectionFile(entityName: string, endpoint: ParsedEndpoint): string {
+  private generateRealtimeCollectionFile(entityName: string, endpoint: ParsedEndpoint): string {
     const lines: string[] = []
-    const pascalName = this.toPascalCase(entityName)
+    const singularName = this.singularize(entityName)
+    const pascalSingular = this.toPascalCase(singularName)
     const camelName = this.toCamelCase(entityName)
-    const collectionName = `${camelName}Collection`
+    const kebabName = this.toKebabCase(entityName)
+    const collectionName = `${camelName}RealtimeCollection`
 
     // File header
-    lines.push(this.generateFileHeader(pascalName))
+    lines.push(this.generateFileHeader(`${pascalSingular} Realtime`))
     lines.push('')
 
     // Imports
@@ -110,15 +140,17 @@ export class CollectionGenerator {
       "import { electricCollectionOptions } from '@tanstack/electric-db-collection'"
     )
     lines.push("import { getElectricUrl, getApiUrl, getAuthToken } from '../config'")
+    lines.push(`import type { ${pascalSingular} } from '../schemas/${kebabName}.schema'`)
     lines.push('')
 
     // JSDoc for collection
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * TanStack DB Electric collection for ${pascalName}`)
+      lines.push(` * TanStack DB Electric realtime collection for ${pascalSingular}`)
       lines.push(' *')
       lines.push(' * Features:')
       lines.push(' * - Real-time sync via ElectricSQL')
+      lines.push(' * - In-memory with sub-ms reactivity')
       lines.push(' * - Optimistic mutations')
       lines.push(' * - Automatic conflict resolution')
       lines.push(' *')
@@ -129,7 +161,7 @@ export class CollectionGenerator {
     }
 
     // Generate collection
-    lines.push(`export const ${collectionName} = createCollection(`)
+    lines.push(`export const ${collectionName} = createCollection<${pascalSingular}>(`)
     lines.push('  electricCollectionOptions({')
     lines.push(`    id: '${entityName}',`)
     lines.push('')
@@ -195,30 +227,97 @@ export class CollectionGenerator {
     return lines.join('\n')
   }
 
-  private generateIndexFile(entityNames: string[]): string {
+  private generateOfflineCollectionFile(entityName: string, endpoint: ParsedEndpoint): string {
+    const lines: string[] = []
+    const singularName = this.singularize(entityName)
+    const pascalSingular = this.toPascalCase(singularName)
+    const camelName = this.toCamelCase(entityName)
+    const kebabName = this.toKebabCase(entityName)
+    const collectionName = `${camelName}OfflineCollection`
+
+    // File header
+    lines.push(this.generateFileHeader(`${pascalSingular} Offline`))
+    lines.push('')
+
+    // Imports
+    lines.push("import { createCollection } from '@tanstack/db'")
+    lines.push("import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'")
+    lines.push("import { getRxDatabase } from '../db/rxdb-init'")
+    lines.push(`import type { ${pascalSingular}Document } from '../db/schemas/${kebabName}.schema'`)
+    lines.push('')
+
+    // JSDoc for collection
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * TanStack DB RxDB offline collection for ${pascalSingular}`)
+      lines.push(' *')
+      lines.push(' * Features:')
+      lines.push(' * - Persistent storage via IndexedDB')
+      lines.push(' * - Survives browser refresh')
+      lines.push(' * - Background sync when online')
+      lines.push(' * - Optimistic mutations')
+      lines.push(' *')
+      if (endpoint.summary) {
+        lines.push(` * ${endpoint.summary}`)
+      }
+      lines.push(' */')
+    }
+
+    // Generate collection
+    lines.push(`export const ${collectionName} = createCollection<${pascalSingular}Document>(`)
+    lines.push('  rxdbCollectionOptions({')
+    lines.push('    getRxCollection: async () => {')
+    lines.push('      const db = await getRxDatabase()')
+    lines.push(`      return db.${entityName}`)
+    lines.push('    },')
+    lines.push('    getKey: (item) => item.id,')
+    lines.push('  })')
+    lines.push(')')
+    lines.push('')
+
+    return lines.join('\n')
+  }
+
+  private generateIndexFile(realtimeEntities: string[], offlineEntities: string[]): string {
     const lines: string[] = []
 
     lines.push(this.generateFileHeader('Collections Index'))
     lines.push('')
     lines.push('/**')
-    lines.push(' * TanStack DB Electric Collections')
+    lines.push(' * TanStack DB Collections')
     lines.push(' *')
-    lines.push(' * Auto-generated collections for entities with local_first: true')
+    lines.push(' * Auto-generated collections for synced entities')
+    lines.push(' * - Realtime: ElectricSQL (in-memory, sub-ms reactivity)')
+    lines.push(' * - Offline: RxDB (IndexedDB, persistent)')
     lines.push(' */')
     lines.push('')
 
-    // Export all collections
-    for (const entityName of entityNames.sort()) {
-      const camelName = this.toCamelCase(entityName)
-      const fileName = this.toKebabCase(entityName)
-      lines.push(`export { ${camelName}Collection } from './${fileName}'`)
+    // Export realtime collections
+    if (realtimeEntities.length > 0) {
+      lines.push('// Realtime collections (ElectricSQL - in-memory, sub-ms)')
+      for (const entityName of realtimeEntities.sort()) {
+        const camelName = this.toCamelCase(entityName)
+        const fileName = this.toKebabCase(entityName)
+        lines.push(`export { ${camelName}RealtimeCollection } from './${fileName}.realtime'`)
+      }
+      lines.push('')
     }
 
-    if (entityNames.length === 0) {
-      lines.push('// No local-first entities found in OpenAPI spec')
+    // Export offline collections
+    if (offlineEntities.length > 0) {
+      lines.push('// Offline collections (RxDB - IndexedDB, persistent)')
+      for (const entityName of offlineEntities.sort()) {
+        const camelName = this.toCamelCase(entityName)
+        const fileName = this.toKebabCase(entityName)
+        lines.push(`export { ${camelName}OfflineCollection } from './${fileName}.offline'`)
+      }
+      lines.push('')
     }
 
-    lines.push('')
+    if (realtimeEntities.length === 0 && offlineEntities.length === 0) {
+      lines.push('// No synced entities found in OpenAPI spec')
+      lines.push('')
+    }
 
     return lines.join('\n')
   }
@@ -249,6 +348,19 @@ export class CollectionGenerator {
       .replace(/([a-z])([A-Z])/g, '$1-$2')
       .replace(/[\s_]+/g, '-')
       .toLowerCase()
+  }
+
+  private singularize(str: string): string {
+    if (str.endsWith('ies')) {
+      return str.slice(0, -3) + 'y'
+    }
+    if (str.endsWith('ses') || str.endsWith('shes') || str.endsWith('ches') || str.endsWith('xes')) {
+      return str.slice(0, -2)
+    }
+    if (str.endsWith('s') && !str.endsWith('ss')) {
+      return str.slice(0, -1)
+    }
+    return str
   }
 }
 

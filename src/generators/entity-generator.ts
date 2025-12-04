@@ -47,13 +47,18 @@ interface CrudOperation {
 }
 
 /**
+ * Sync mode for an entity
+ */
+type SyncMode = 'api' | 'realtime' | 'offline'
+
+/**
  * Information about an entity extracted from endpoints
  */
 interface EntityInfo {
   name: string           // singular: "account"
   namePlural: string     // plural: "accounts"
   pascalName: string     // "Account"
-  hasCollection: boolean // true if local_first: true
+  syncMode: SyncMode     // 'api', 'realtime', or 'offline'
   operations: CrudOperation[]
   /** All hook names for this entity (for re-export) */
   allHookNames: Set<string>
@@ -112,7 +117,7 @@ export class EntityGenerator {
           name: singular,
           namePlural: entityNamePlural,
           pascalName: this.toPascalCase(singular),
-          hasCollection: false,
+          syncMode: 'api',
           operations: [],
           allHookNames: new Set(),
           relatedSchemas: new Set(),
@@ -122,9 +127,11 @@ export class EntityGenerator {
         entityMap.set(entityNamePlural, entityInfo)
       }
 
-      // Update collection status if local_first
-      if (endpoint.localFirst === true) {
-        entityInfo.hasCollection = true
+      // Update sync mode from endpoint
+      const endpointSyncMode = this.getSyncMode(endpoint)
+      if (endpointSyncMode !== 'api') {
+        // Prefer non-api sync modes (realtime/offline)
+        entityInfo.syncMode = endpointSyncMode
       }
 
       // Collect ALL hook names for this entity's endpoints
@@ -298,7 +305,8 @@ export class EntityGenerator {
    */
   private generateWrapper(entity: EntityInfo): string {
     const lines: string[] = []
-    const { namePlural, pascalName, hasCollection, operations, relatedSchemas, allHookNames } = entity
+    const { namePlural, pascalName, syncMode, operations, relatedSchemas, allHookNames } = entity
+    const hasCollection = syncMode !== 'api'
 
     // Determine which operations we have
     const hasOp = {
@@ -386,12 +394,21 @@ export class EntityGenerator {
     // These are internal - we use hooks.* for the wrapper implementations
 
     if (hasCollection) {
-      lines.push("import { isLocalFirst } from '../config'")
+      lines.push("import { getSyncMode } from '../config'")
+      lines.push("import type { SyncMode } from '../config'")
       // TanStack DB React integration for live queries
       lines.push("import { useLiveQuery } from '@tanstack/react-db'")
       // Query operators for filtering
       lines.push("import { eq } from '@tanstack/db'")
-      lines.push(`import { ${this.toCamelCase(namePlural)}Collection } from '../collections/${this.toKebabCase(namePlural)}'`)
+
+      // Import the correct collection based on sync mode
+      const collectionBaseName = this.toCamelCase(namePlural)
+      const kebabName = this.toKebabCase(namePlural)
+      if (syncMode === 'realtime') {
+        lines.push(`import { ${collectionBaseName}RealtimeCollection } from '../collections/${kebabName}.realtime'`)
+      } else if (syncMode === 'offline') {
+        lines.push(`import { ${collectionBaseName}OfflineCollection } from '../collections/${kebabName}.offline'`)
+      }
     }
 
     // Import hooks as namespace for internal use
@@ -496,8 +513,9 @@ export class EntityGenerator {
   }
 
   private generateListHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, hasCollection } = entity
+    const { namePlural, pascalName, syncMode } = entity
     const entityType = this.getEntityType(entity)
+    const hasCollection = syncMode !== 'api'
     const lines: string[] = []
 
     if (this.options.includeJSDoc) {
@@ -511,10 +529,16 @@ export class EntityGenerator {
 
     if (hasCollection) {
       const collName = this.toCamelCase(namePlural)
-      lines.push(`  if (isLocalFirst('${namePlural}')) {`)
+      const collSuffix = syncMode === 'realtime' ? 'Realtime' : 'Offline'
+      const collectionName = `${collName}${collSuffix}Collection`
+      const modeCheck = syncMode === 'realtime' ? 'realtime' : 'offline'
+
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+      lines.push(`  if (mode === '${modeCheck}') {`)
       lines.push('    // Use TanStack DB live query for reactive data')
       lines.push(`    const { data } = useLiveQuery((q) =>`)
-      lines.push(`      q.from({ item: ${collName}Collection })`)
+      lines.push(`      q.from({ item: ${collectionName} })`)
       lines.push(`        .select(({ item }) => item)`)
       lines.push('    )')
       lines.push('    return {')
@@ -523,8 +547,11 @@ export class EntityGenerator {
       lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
+      lines.push('')
     }
 
+    // API mode (default)
+    lines.push('  // api mode - use TanStack Query')
     lines.push(`  const result = hooks.${operation.hookName}()`)
     lines.push('  return {')
     lines.push(`    data: result.data as ${entityType}[] | undefined,`)
@@ -537,8 +564,9 @@ export class EntityGenerator {
   }
 
   private generateGetHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, hasCollection, name } = entity
+    const { namePlural, pascalName, syncMode, name } = entity
     const entityType = this.getEntityType(entity)
+    const hasCollection = syncMode !== 'api'
     const paramName = operation.pathParamName || 'id'
     const lines: string[] = []
 
@@ -553,10 +581,16 @@ export class EntityGenerator {
 
     if (hasCollection) {
       const collName = this.toCamelCase(namePlural)
-      lines.push(`  if (isLocalFirst('${namePlural}')) {`)
+      const collSuffix = syncMode === 'realtime' ? 'Realtime' : 'Offline'
+      const collectionName = `${collName}${collSuffix}Collection`
+      const modeCheck = syncMode === 'realtime' ? 'realtime' : 'offline'
+
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+      lines.push(`  if (mode === '${modeCheck}') {`)
       lines.push('    // Use TanStack DB live query with filter')
       lines.push(`    const { data } = useLiveQuery((q) =>`)
-      lines.push(`      q.from({ item: ${collName}Collection })`)
+      lines.push(`      q.from({ item: ${collectionName} })`)
       lines.push(`        .where(({ item }) => eq(item.id, id))`)
       lines.push(`        .select(({ item }) => item)`)
       lines.push('    )')
@@ -566,8 +600,11 @@ export class EntityGenerator {
       lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
+      lines.push('')
     }
 
+    // API mode (default)
+    lines.push('  // api mode - use TanStack Query')
     lines.push(`  const result = hooks.${operation.hookName}({ ${paramName}: id })`)
     lines.push('  return {')
     lines.push(`    data: result.data as ${entityType} | undefined,`)
@@ -580,8 +617,9 @@ export class EntityGenerator {
   }
 
   private generateCreateHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, hasCollection, requestTypes } = entity
+    const { namePlural, pascalName, syncMode, requestTypes } = entity
     const entityType = this.getEntityType(entity)
+    const hasCollection = syncMode !== 'api'
     const createType = requestTypes.has(`${pascalName}Create`) ? `${pascalName}Create` : 'Record<string, unknown>'
     const lines: string[] = []
 
@@ -596,27 +634,47 @@ export class EntityGenerator {
 
     if (hasCollection) {
       const collName = this.toCamelCase(namePlural)
-      lines.push(`  if (isLocalFirst('${namePlural}')) {`)
-      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
+      const collSuffix = syncMode === 'realtime' ? 'Realtime' : 'Offline'
+      const collectionName = `${collName}${collSuffix}Collection`
+      const modeCheck = syncMode === 'realtime' ? 'realtime' : 'offline'
+
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+      lines.push(`  if (mode === '${modeCheck}') {`)
       lines.push('    return {')
-      lines.push('      mutate: (data) => {')
-      lines.push(`        ${collName}Collection.insert(data as Record<string, unknown>)`)
+      lines.push(`      mutate: (data: ${createType}) => {`)
+      lines.push(`        ${collectionName}.insert({`)
+      lines.push('          ...data,')
+      lines.push('          id: crypto.randomUUID(),')
+      lines.push('          created_at: new Date().toISOString(),')
+      lines.push('          updated_at: new Date().toISOString(),')
+      lines.push('        } as Record<string, unknown>)')
       lines.push('      },')
-      lines.push('      mutateAsync: async (data) => {')
-      lines.push('        // Insert is synchronous/optimistic, return the data immediately')
-      lines.push(`        ${collName}Collection.insert(data as Record<string, unknown>)`)
-      lines.push(`        return data as unknown as ${entityType}`)
+      lines.push(`      mutateAsync: async (data: ${createType}) => {`)
+      lines.push('        const doc = {')
+      lines.push('          ...data,')
+      lines.push('          id: crypto.randomUUID(),')
+      lines.push('          created_at: new Date().toISOString(),')
+      lines.push('          updated_at: new Date().toISOString(),')
+      lines.push('        }')
+      lines.push(`        await ${collectionName}.insert(doc as Record<string, unknown>)`)
+      lines.push(`        return doc as unknown as ${entityType}`)
       lines.push('      },')
-      lines.push('      isPending: false,')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
+      lines.push('')
     }
 
+    // API mode (default)
+    lines.push('  // api mode')
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
     lines.push(`    mutate: (data: ${createType}) => mutation.mutate(data as Record<string, unknown>),`)
     lines.push(`    mutateAsync: async (data: ${createType}) => mutation.mutateAsync(data as Record<string, unknown>) as Promise<${entityType}>,`)
     lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
     lines.push('  }')
     lines.push('}')
 
@@ -624,8 +682,9 @@ export class EntityGenerator {
   }
 
   private generateUpdateHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, hasCollection, requestTypes } = entity
+    const { namePlural, pascalName, syncMode, requestTypes } = entity
     const entityType = this.getEntityType(entity)
+    const hasCollection = syncMode !== 'api'
     const updateType = requestTypes.has(`${pascalName}Update`) ? `${pascalName}Update` : 'Record<string, unknown>'
     const paramName = operation.pathParamName || 'id'
     const lines: string[] = []
@@ -641,27 +700,36 @@ export class EntityGenerator {
 
     if (hasCollection) {
       const collName = this.toCamelCase(namePlural)
-      lines.push(`  if (isLocalFirst('${namePlural}')) {`)
-      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
+      const collSuffix = syncMode === 'realtime' ? 'Realtime' : 'Offline'
+      const collectionName = `${collName}${collSuffix}Collection`
+      const modeCheck = syncMode === 'realtime' ? 'realtime' : 'offline'
+
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+      lines.push(`  if (mode === '${modeCheck}') {`)
       lines.push('    return {')
-      lines.push('      mutate: ({ id, data }) => {')
-      lines.push(`        ${collName}Collection.update(id, (draft) => Object.assign(draft, data))`)
+      lines.push(`      mutate: ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        ${collectionName}.update(id, (draft) => Object.assign(draft, { ...data, updated_at: new Date().toISOString() }))`)
       lines.push('      },')
-      lines.push('      mutateAsync: async ({ id, data }) => {')
-      lines.push('        // Update is synchronous/optimistic')
-      lines.push(`        ${collName}Collection.update(id, (draft) => Object.assign(draft, data))`)
+      lines.push(`      mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        await ${collectionName}.update(id, (draft) => Object.assign(draft, { ...data, updated_at: new Date().toISOString() }))`)
       lines.push(`        return { id, ...data } as unknown as ${entityType}`)
       lines.push('      },')
-      lines.push('      isPending: false,')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
+      lines.push('')
     }
 
+    // API mode (default)
+    lines.push('  // api mode')
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
     lines.push(`    mutate: ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutate({ pathParams: { ${paramName}: id }, ...data }),`)
     lines.push(`    mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutateAsync({ pathParams: { ${paramName}: id }, ...data }) as Promise<${entityType}>,`)
     lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
     lines.push('  }')
     lines.push('}')
 
@@ -669,7 +737,8 @@ export class EntityGenerator {
   }
 
   private generateDeleteHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, hasCollection } = entity
+    const { namePlural, pascalName, syncMode } = entity
+    const hasCollection = syncMode !== 'api'
     const paramName = operation.pathParamName || 'id'
     const lines: string[] = []
 
@@ -684,26 +753,35 @@ export class EntityGenerator {
 
     if (hasCollection) {
       const collName = this.toCamelCase(namePlural)
-      lines.push(`  if (isLocalFirst('${namePlural}')) {`)
-      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
+      const collSuffix = syncMode === 'realtime' ? 'Realtime' : 'Offline'
+      const collectionName = `${collName}${collSuffix}Collection`
+      const modeCheck = syncMode === 'realtime' ? 'realtime' : 'offline'
+
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+      lines.push(`  if (mode === '${modeCheck}') {`)
       lines.push('    return {')
-      lines.push('      mutate: (id) => {')
-      lines.push(`        ${collName}Collection.delete(id)`)
+      lines.push('      mutate: (id: string) => {')
+      lines.push(`        ${collectionName}.delete(id)`)
       lines.push('      },')
-      lines.push('      mutateAsync: async (id) => {')
-      lines.push('        // Delete is synchronous/optimistic')
-      lines.push(`        ${collName}Collection.delete(id)`)
+      lines.push('      mutateAsync: async (id: string) => {')
+      lines.push(`        await ${collectionName}.delete(id)`)
       lines.push('      },')
-      lines.push('      isPending: false,')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
+      lines.push('')
     }
 
+    // API mode (default)
+    lines.push('  // api mode')
     lines.push(`  const mutation = hooks.${operation.hookName}()`)
     lines.push('  return {')
     lines.push(`    mutate: (id: string) => mutation.mutate({ pathParams: { ${paramName}: id } }),`)
     lines.push(`    mutateAsync: async (id: string) => { await mutation.mutateAsync({ pathParams: { ${paramName}: id } }) },`)
     lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
     lines.push('  }')
     lines.push('}')
 
@@ -786,6 +864,22 @@ export class EntityGenerator {
       (seg) => !skipPrefixes.includes(seg.toLowerCase())
     )
     return resourceSegment || null
+  }
+
+  /**
+   * Get sync mode from endpoint with backward compatibility
+   */
+  private getSyncMode(endpoint: ParsedEndpoint): SyncMode {
+    // New format: explicit syncMode
+    if (endpoint.syncMode === 'offline') return 'offline'
+    if (endpoint.syncMode === 'realtime') return 'realtime'
+    if (endpoint.syncMode === 'api') return 'api'
+
+    // Legacy format: localFirst boolean
+    // local_first: true → 'realtime' (backward compat)
+    if (endpoint.localFirst === true) return 'realtime'
+
+    return 'api'
   }
 
   private generateFileHeader(title: string): string {
