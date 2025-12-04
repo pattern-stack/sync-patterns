@@ -27,8 +27,10 @@ program
   .option('--no-client', 'Skip API client generation')
   .option('--hooks [boolean]', 'Generate React Query hooks', true)
   .option('--no-hooks', 'Skip React Query hook generation')
-  .option('--collections', 'Generate TanStack DB collections', false)
-  .option('--entities', 'Generate unified entity wrappers', false)
+  .option('--collections [boolean]', 'Generate TanStack DB collections (for local_first: true)', true)
+  .option('--no-collections', 'Skip TanStack DB collection generation')
+  .option('--entities [boolean]', 'Generate unified entity wrappers (THE public API)', true)
+  .option('--no-entities', 'Skip entity wrapper generation')
   .option(
     '--api-url <url>',
     'Default API base URL for generated client',

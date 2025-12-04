@@ -14,7 +14,7 @@
  */
 
 import type { ParsedOpenAPI, ParsedEndpoint, ParsedSchema } from './parser.js'
-import { cleanOperationId, toPascalCase as namingToPascalCase, toCamelCase as namingToCamelCase } from './naming.js'
+import { cleanOperationId, toPascalCase as namingToPascalCase } from './naming.js'
 
 export interface GeneratedEntityWrappers {
   /** Map of entity name to wrapper code */
@@ -342,7 +342,7 @@ export class EntityGenerator {
       for (const schema of sortedSchemas) {
         lines.push(`  ${schema},`)
       }
-      lines.push(`} from '../../schemas/index.js'`)
+      lines.push(`} from '../schemas/index'`)
       lines.push('')
 
       // Export schema validators (Zod schemas)
@@ -350,25 +350,33 @@ export class EntityGenerator {
       for (const schema of sortedSchemas) {
         lines.push(`  ${schema}Schema,`)
       }
-      lines.push(`} from '../../schemas/index.js'`)
+      lines.push(`} from '../schemas/index'`)
       lines.push('')
     }
 
     // =========================================================================
-    // SECTION 2: Re-export all related hooks
+    // SECTION 2: Re-export NON-CRUD hooks (CRUD hooks are replaced by unified wrappers)
     // =========================================================================
-    lines.push('// ============================================================================')
-    lines.push('// HOOKS - All TanStack Query hooks for this entity')
-    lines.push('// ============================================================================')
-    lines.push('')
+    // Build set of hooks that have unified wrappers (don't re-export these)
+    const unifiedWrapperHooks = new Set<string>()
+    for (const op of operations) {
+      unifiedWrapperHooks.add(op.hookName)
+    }
 
-    if (allHookNames.size > 0) {
-      const sortedHooks = Array.from(allHookNames).sort()
+    // Filter to only hooks that don't have unified wrappers
+    const hooksToReExport = Array.from(allHookNames).filter(h => !unifiedWrapperHooks.has(h)).sort()
+
+    if (hooksToReExport.length > 0) {
+      lines.push('// ============================================================================')
+      lines.push('// HOOKS - Additional TanStack Query hooks for this entity')
+      lines.push('// (CRUD hooks are replaced by unified wrappers below)')
+      lines.push('// ============================================================================')
+      lines.push('')
       lines.push(`export {`)
-      for (const hook of sortedHooks) {
+      for (const hook of hooksToReExport) {
         lines.push(`  ${hook},`)
       }
-      lines.push(`} from '../../hooks/index.js'`)
+      lines.push(`} from '../hooks/index'`)
       lines.push('')
     }
 
@@ -378,21 +386,24 @@ export class EntityGenerator {
     // These are internal - we use hooks.* for the wrapper implementations
 
     if (hasCollection) {
-      lines.push("import { isLocalFirst } from '../../config.js'")
-      lines.push("import { useLiveQuery, eq } from '@tanstack/react-db'")
-      lines.push(`import { ${this.toCamelCase(namePlural)}Collection } from '../../collections/${this.toKebabCase(namePlural)}.js'`)
+      lines.push("import { isLocalFirst } from '../config'")
+      // TanStack DB React integration for live queries
+      lines.push("import { useLiveQuery } from '@tanstack/react-db'")
+      // Query operators for filtering
+      lines.push("import { eq } from '@tanstack/db'")
+      lines.push(`import { ${this.toCamelCase(namePlural)}Collection } from '../collections/${this.toKebabCase(namePlural)}'`)
     }
 
     // Import hooks as namespace for internal use
-    lines.push("import * as hooks from '../../hooks/index.js'")
+    lines.push("import * as hooks from '../hooks/index'")
 
     // Import types we need for the wrapper functions
     const wrapperTypes = this.getWrapperTypeImports(entity)
     if (wrapperTypes.length > 0) {
-      lines.push(`import type { ${wrapperTypes.join(', ')} } from '../../schemas/index.js'`)
+      lines.push(`import type { ${wrapperTypes.join(', ')} } from '../schemas/index'`)
     }
 
-    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult } from '../types.js'")
+    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult } from './types'")
     lines.push('')
 
     // =========================================================================
@@ -441,7 +452,7 @@ export class EntityGenerator {
    */
   private getWrapperTypeImports(entity: EntityInfo): string[] {
     const types = new Set<string>()
-    const { pascalName, requestTypes, responseTypes } = entity
+    const { pascalName, requestTypes } = entity
 
     // Get entity type for return values
     const entityType = this.getEntityType(entity)
@@ -499,21 +510,24 @@ export class EntityGenerator {
     lines.push(`export function use${pascalName}s(): UnifiedQueryResult<${entityType}[]> {`)
 
     if (hasCollection) {
+      const collName = this.toCamelCase(namePlural)
       lines.push(`  if (isLocalFirst('${namePlural}')) {`)
-      lines.push('    const result = useLiveQuery((q) =>')
-      lines.push(`      q.from({ ${namePlural}: ${this.toCamelCase(namePlural)}Collection })`)
+      lines.push('    // Use TanStack DB live query for reactive data')
+      lines.push(`    const { data } = useLiveQuery((q) =>`)
+      lines.push(`      q.from({ item: ${collName}Collection })`)
+      lines.push(`        .select(({ item }) => item)`)
       lines.push('    )')
       lines.push('    return {')
-      lines.push('      data: result.data,')
-      lines.push('      isLoading: result.isLoading,')
-      lines.push('      error: result.error,')
+      lines.push(`      data: data as ${entityType}[] | undefined,`)
+      lines.push('      isLoading: data === undefined,')
+      lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
     }
 
     lines.push(`  const result = hooks.${operation.hookName}()`)
     lines.push('  return {')
-    lines.push('    data: result.data,')
+    lines.push(`    data: result.data as ${entityType}[] | undefined,`)
     lines.push('    isLoading: result.isLoading,')
     lines.push('    error: result.error ?? null,')
     lines.push('  }')
@@ -538,16 +552,18 @@ export class EntityGenerator {
     lines.push(`export function use${pascalName}(id: string): UnifiedQueryResult<${entityType} | undefined> {`)
 
     if (hasCollection) {
+      const collName = this.toCamelCase(namePlural)
       lines.push(`  if (isLocalFirst('${namePlural}')) {`)
-      lines.push('    const result = useLiveQuery((q) =>')
-      lines.push(`      q.from({ ${namePlural}: ${this.toCamelCase(namePlural)}Collection })`)
-      lines.push(`       .where(({ ${namePlural} }) => eq(${namePlural}.id, id))`)
-      lines.push('       .first()')
+      lines.push('    // Use TanStack DB live query with filter')
+      lines.push(`    const { data } = useLiveQuery((q) =>`)
+      lines.push(`      q.from({ item: ${collName}Collection })`)
+      lines.push(`        .where(({ item }) => eq(item.id, id))`)
+      lines.push(`        .select(({ item }) => item)`)
       lines.push('    )')
       lines.push('    return {')
-      lines.push('      data: result.data,')
-      lines.push('      isLoading: result.isLoading,')
-      lines.push('      error: result.error,')
+      lines.push(`      data: data?.[0] as ${entityType} | undefined,`)
+      lines.push('      isLoading: data === undefined,')
+      lines.push('      error: null,')
       lines.push('    }')
       lines.push('  }')
     }
@@ -579,13 +595,17 @@ export class EntityGenerator {
     lines.push(`export function useCreate${pascalName}(): UnifiedMutationResult<${entityType}, ${createType}> {`)
 
     if (hasCollection) {
+      const collName = this.toCamelCase(namePlural)
       lines.push(`  if (isLocalFirst('${namePlural}')) {`)
+      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
       lines.push('    return {')
-      lines.push(`      mutate: (data) => ${this.toCamelCase(namePlural)}Collection.insert(data),`)
+      lines.push('      mutate: (data) => {')
+      lines.push(`        ${collName}Collection.insert(data as Record<string, unknown>)`)
+      lines.push('      },')
       lines.push('      mutateAsync: async (data) => {')
-      lines.push(`        const tx = ${this.toCamelCase(namePlural)}Collection.insert(data)`)
-      lines.push('        await tx.isPersisted.promise')
-      lines.push(`        return tx.mutations[0].modified as ${entityType}`)
+      lines.push('        // Insert is synchronous/optimistic, return the data immediately')
+      lines.push(`        ${collName}Collection.insert(data as Record<string, unknown>)`)
+      lines.push(`        return data as unknown as ${entityType}`)
       lines.push('      },')
       lines.push('      isPending: false,')
       lines.push('    }')
@@ -620,15 +640,17 @@ export class EntityGenerator {
     lines.push(`export function useUpdate${pascalName}(): UnifiedMutationResult<${entityType}, { id: string; data: ${updateType} }> {`)
 
     if (hasCollection) {
+      const collName = this.toCamelCase(namePlural)
       lines.push(`  if (isLocalFirst('${namePlural}')) {`)
+      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
       lines.push('    return {')
       lines.push('      mutate: ({ id, data }) => {')
-      lines.push(`        ${this.toCamelCase(namePlural)}Collection.update(id, (draft) => Object.assign(draft, data))`)
+      lines.push(`        ${collName}Collection.update(id, (draft) => Object.assign(draft, data))`)
       lines.push('      },')
       lines.push('      mutateAsync: async ({ id, data }) => {')
-      lines.push(`        const tx = ${this.toCamelCase(namePlural)}Collection.update(id, (draft) => Object.assign(draft, data))`)
-      lines.push('        await tx.isPersisted.promise')
-      lines.push(`        return tx.mutations[0].modified as ${entityType}`)
+      lines.push('        // Update is synchronous/optimistic')
+      lines.push(`        ${collName}Collection.update(id, (draft) => Object.assign(draft, data))`)
+      lines.push(`        return { id, ...data } as unknown as ${entityType}`)
       lines.push('      },')
       lines.push('      isPending: false,')
       lines.push('    }')
@@ -661,12 +683,16 @@ export class EntityGenerator {
     lines.push(`export function useDelete${pascalName}(): UnifiedMutationResult<void, string> {`)
 
     if (hasCollection) {
+      const collName = this.toCamelCase(namePlural)
       lines.push(`  if (isLocalFirst('${namePlural}')) {`)
+      lines.push('    // TanStack DB mutations are optimistic - they update immediately')
       lines.push('    return {')
-      lines.push(`      mutate: (id) => ${this.toCamelCase(namePlural)}Collection.delete(id),`)
+      lines.push('      mutate: (id) => {')
+      lines.push(`        ${collName}Collection.delete(id)`)
+      lines.push('      },')
       lines.push('      mutateAsync: async (id) => {')
-      lines.push(`        const tx = ${this.toCamelCase(namePlural)}Collection.delete(id)`)
-      lines.push('        await tx.isPersisted.promise')
+      lines.push('        // Delete is synchronous/optimistic')
+      lines.push(`        ${collName}Collection.delete(id)`)
       lines.push('      },')
       lines.push('      isPending: false,')
       lines.push('    }')
@@ -732,13 +758,13 @@ export class EntityGenerator {
     lines.push('')
 
     // Export shared types first
-    lines.push("export * from './types.js'")
+    lines.push("export * from './types'")
     lines.push('')
 
     // Export all entity modules
     for (const entityName of entityNames.sort()) {
       const fileName = this.toKebabCase(entityName)
-      lines.push(`export * from './${fileName}.js'`)
+      lines.push(`export * from './${fileName}'`)
     }
 
     if (entityNames.length === 0) {

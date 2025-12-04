@@ -96,8 +96,8 @@ export class ReactHookGenerator {
         "import { useQuery, type UseQueryOptions } from '@tanstack/react-query'",
       )
     }
-    hooks.push("import { apiClient } from '../client/index.js'")
-    hooks.push("import { queryKeys } from './keys.js'")
+    hooks.push("import { apiClient } from '../client/index'")
+    hooks.push("import { queryKeys } from './keys'")
     hooks.push('')
 
     // Filter GET endpoints for queries
@@ -327,8 +327,8 @@ export class ReactHookGenerator {
     hooks.push(
       "import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query'",
     )
-    hooks.push("import { apiClient } from '../client/index.js'")
-    hooks.push("import { queryKeys } from './keys.js'")
+    hooks.push("import { apiClient } from '../client/index'")
+    hooks.push("import { queryKeys } from './keys'")
 
     // Only import bulk types if we have bulk operations
     const hasBulkOps = endpoints.some((e) => {
@@ -338,7 +338,7 @@ export class ReactHookGenerator {
 
     if (hasBulkOps) {
       hooks.push(
-        "import type { BulkOperationRequest, BulkOperationResponse, BulkOperationProgress, BulkMutationOptions } from './types.js'",
+        "import type { BulkOperationRequest, BulkOperationResponse, BulkOperationProgress, BulkMutationOptions } from './types'",
       )
     }
 
@@ -723,16 +723,16 @@ export interface BulkMutationOptions {
     exports.push(this.generateFileHeader('Generated React Hooks'))
     exports.push('')
     exports.push('// Query hooks')
-    exports.push("export * from './queries.js'")
+    exports.push("export * from './queries'")
     exports.push('')
     exports.push('// Mutation hooks')
-    exports.push("export * from './mutations.js'")
+    exports.push("export * from './mutations'")
     exports.push('')
     exports.push('// Query keys')
-    exports.push("export { queryKeys } from './keys.js'")
+    exports.push("export { queryKeys } from './keys'")
     exports.push('')
     exports.push('// Hook types')
-    exports.push("export * from './types.js'")
+    exports.push("export * from './types'")
 
     return exports.join('\n')
   }

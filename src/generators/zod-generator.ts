@@ -95,7 +95,7 @@ export class ZodSchemaGenerator {
     const sortedRefs = Array.from(referencedSchemas).sort()
     for (const refName of sortedRefs) {
       const fileName = this.toKebabCase(refName)
-      lines.push(`import { ${refName}Schema } from './${fileName}.schema.js'`)
+      lines.push(`import { ${refName}Schema } from './${fileName}.schema'`)
     }
 
     lines.push('')
@@ -368,7 +368,7 @@ export class ZodSchemaGenerator {
     for (const schema of schemas) {
       if (!schema.name) continue
       const fileName = this.toKebabCase(schema.name)
-      lines.push(`export * from './${fileName}.schema.js'`)
+      lines.push(`export * from './${fileName}.schema'`)
     }
 
     lines.push('')

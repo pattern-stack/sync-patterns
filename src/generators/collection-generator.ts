@@ -103,15 +103,13 @@ export class CollectionGenerator {
     lines.push('')
 
     // Imports
-    lines.push("import { createCollection } from '@tanstack/react-db'")
+    // TanStack DB core - collection creation
+    lines.push("import { createCollection } from '@tanstack/db'")
+    // Electric integration - real-time sync with ElectricSQL
     lines.push(
       "import { electricCollectionOptions } from '@tanstack/electric-db-collection'"
     )
-    lines.push("import { getElectricUrl } from '../config.js'")
-    lines.push(
-      `import { ${pascalName}Schema } from '../schemas/${this.toKebabCase(entityName)}.schema.js'`
-    )
-    lines.push(`import { apiClient } from '../client/index.js'`)
+    lines.push("import { getElectricUrl, getApiUrl, getAuthToken } from '../config'")
     lines.push('')
 
     // JSDoc for collection
@@ -144,31 +142,51 @@ export class CollectionGenerator {
     lines.push('    },')
     lines.push('')
     lines.push('    getKey: (item) => item.id,')
-    lines.push(`    schema: ${pascalName}Schema,`)
     lines.push('')
-    lines.push('    // Mutation handlers - call API and return txid')
+    lines.push('    // Mutation handlers - sync changes to server')
     lines.push('    onInsert: async ({ transaction }) => {')
     lines.push('      const item = transaction.mutations[0].modified')
-    lines.push(
-      `      const response = await apiClient.post<{ txid: string }>('/${entityName}', item)`
-    )
-    lines.push('      return { txid: response.txid }')
+    lines.push(`      const response = await fetch(\`\${getApiUrl()}/${entityName}\`, {`)
+    lines.push("        method: 'POST',")
+    lines.push("        headers: {")
+    lines.push("          'Content-Type': 'application/json',")
+    lines.push("          'Authorization': `Bearer ${getAuthToken()}`,")
+    lines.push("        },")
+    lines.push('        body: JSON.stringify(item),')
+    lines.push('      })')
+    lines.push(`      if (!response.ok) throw new Error('Failed to create ${entityName}')`)
+    lines.push('      const data = await response.json()')
+    lines.push('      return { txid: data.txid ?? data.id }')
     lines.push('    },')
     lines.push('')
     lines.push('    onUpdate: async ({ transaction }) => {')
     lines.push('      const { original, changes } = transaction.mutations[0]')
-    lines.push(
-      `      const response = await apiClient.patch<{ txid: string }>(\`/${entityName}/\${original.id}\`, changes)`
-    )
-    lines.push('      return { txid: response.txid }')
+    lines.push(`      const response = await fetch(\`\${getApiUrl()}/${entityName}/\${original.id}\`, {`)
+    lines.push("        method: 'PATCH',")
+    lines.push("        headers: {")
+    lines.push("          'Content-Type': 'application/json',")
+    lines.push("          'Authorization': `Bearer ${getAuthToken()}`,")
+    lines.push("        },")
+    lines.push('        body: JSON.stringify(changes),')
+    lines.push('      })')
+    lines.push(`      if (!response.ok) throw new Error('Failed to update ${entityName}')`)
+    lines.push('      const data = await response.json()')
+    lines.push('      return { txid: data.txid ?? data.id }')
     lines.push('    },')
     lines.push('')
     lines.push('    onDelete: async ({ transaction }) => {')
     lines.push('      const { original } = transaction.mutations[0]')
-    lines.push(
-      `      const response = await apiClient.delete<{ txid: string }>(\`/${entityName}/\${original.id}\`)`
-    )
-    lines.push('      return { txid: response.txid }')
+    lines.push(`      const response = await fetch(\`\${getApiUrl()}/${entityName}/\${original.id}\`, {`)
+    lines.push("        method: 'DELETE',")
+    lines.push("        headers: {")
+    lines.push("          'Authorization': `Bearer ${getAuthToken()}`,")
+    lines.push("        },")
+    lines.push('      })')
+    lines.push(`      if (!response.ok) throw new Error('Failed to delete ${entityName}')`)
+    lines.push('      // DELETE may return empty body or confirmation')
+    lines.push('      const text = await response.text()')
+    lines.push('      const data = text ? JSON.parse(text) : {}')
+    lines.push('      return { txid: data.txid ?? original.id }')
     lines.push('    },')
     lines.push('  })')
     lines.push(')')
@@ -193,7 +211,7 @@ export class CollectionGenerator {
     for (const entityName of entityNames.sort()) {
       const camelName = this.toCamelCase(entityName)
       const fileName = this.toKebabCase(entityName)
-      lines.push(`export { ${camelName}Collection } from './${fileName}.js'`)
+      lines.push(`export { ${camelName}Collection } from './${fileName}'`)
     }
 
     if (entityNames.length === 0) {

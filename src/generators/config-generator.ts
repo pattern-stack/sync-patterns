@@ -52,6 +52,10 @@ export class ConfigGenerator {
     lines.push('export interface SyncConfig {')
     lines.push('  /** Electric sync service URL */')
     lines.push('  electricUrl: string')
+    lines.push('  /** API base URL for mutations */')
+    lines.push('  apiUrl: string')
+    lines.push('  /** Key for auth token in localStorage */')
+    lines.push('  authTokenKey: string')
     lines.push('  /** Default local-first behavior for entities not explicitly configured */')
     lines.push('  defaultLocalFirst: boolean')
     lines.push('  /** Per-entity local-first configuration */')
@@ -68,6 +72,8 @@ export class ConfigGenerator {
     }
     lines.push('let config: SyncConfig = {')
     lines.push("  electricUrl: '',")
+    lines.push("  apiUrl: import.meta.env?.VITE_API_URL ?? '/api/v1',")
+    lines.push("  authTokenKey: 'auth_token',")
     lines.push('  defaultLocalFirst: false,')
     lines.push('  entities: {')
 
@@ -158,6 +164,33 @@ export class ConfigGenerator {
     }
     lines.push('export function getSyncConfig(): SyncConfig {')
     lines.push('  return { ...config, entities: { ...config.entities } }')
+    lines.push('}')
+    lines.push('')
+
+    // getApiUrl function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the configured API base URL')
+      lines.push(' *')
+      lines.push(' * @returns API base URL (e.g., "/api/v1")')
+      lines.push(' */')
+    }
+    lines.push('export function getApiUrl(): string {')
+    lines.push('  return config.apiUrl')
+    lines.push('}')
+    lines.push('')
+
+    // getAuthToken function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the current auth token from localStorage')
+      lines.push(' *')
+      lines.push(" * @returns Auth token or empty string if not found")
+      lines.push(' */')
+    }
+    lines.push('export function getAuthToken(): string {')
+    lines.push("  if (typeof localStorage === 'undefined') return ''")
+    lines.push('  return localStorage.getItem(config.authTokenKey) ?? ""')
     lines.push('}')
     lines.push('')
 

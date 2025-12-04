@@ -17,7 +17,7 @@
         "local_first": true
       },
       "get": {
-        "operationId": "getContacts",
+        "operationId": "list_contacts",
         "summary": "List all contacts",
         "responses": {
           "200": {
@@ -36,7 +36,7 @@
         }
       },
       "post": {
-        "operationId": "createContact",
+        "operationId": "create_contact",
         "summary": "Create a new contact",
         "requestBody": {
           "required": true,
@@ -64,7 +64,7 @@
     },
     "/contacts/{id}": {
       "get": {
-        "operationId": "getContact",
+        "operationId": "get_contact",
         "summary": "Get a contact by ID",
         "parameters": [
           {
@@ -87,6 +87,63 @@
                 }
               }
             }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "update_contact",
+        "summary": "Update a contact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contact updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Contact"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_contact",
+        "summary": "Delete a contact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Contact deleted"
           }
         }
       }
@@ -155,6 +212,32 @@
             "format": "email",
             "nullable": true,
             "description": "Email address"
+          }
+        }
+      },
+      "ContactUpdate": {
+        "type": "object",
+        "description": "Data for updating a contact",
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "description": "First name"
+          },
+          "last_name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Last name"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "nullable": true,
+            "description": "Email address"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "pending"],
+            "description": "Contact status"
           }
         }
       },

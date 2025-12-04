@@ -7,8 +7,8 @@
  * Migrated from frontend-patterns to sync-patterns
  */
 
-import type { ParsedOpenAPI, ParsedEndpoint, ParsedParameter } from './parser.js'
-import { toClientMethodName, generateFallbackName, toCamelCase } from './naming.js'
+import type { ParsedOpenAPI, ParsedEndpoint, ParsedParameter } from './parser'
+import { toClientMethodName, generateFallbackName, toCamelCase } from './naming'
 
 export interface ClientGeneratorOptions {
   clientType?: 'axios' | 'fetch'
@@ -73,7 +73,7 @@ export class APIClientGenerator {
  */
 
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { APIClientConfig, RequestOptions, APIError } from './types.js'
+import { APIClientConfig, RequestOptions, APIError } from './types'
 
 export class APIClient {
   private client: AxiosInstance
@@ -180,7 +180,7 @@ export class APIClient {
  * Auto-generated API client using native fetch with error handling
  */
 
-import { APIClientConfig, RequestOptions, APIError } from './types.js'
+import { APIClientConfig, RequestOptions, APIError } from './types'
 
 export class APIClient {
   private config: APIClientConfig
@@ -459,8 +459,8 @@ export class APIClient {
 
     methods.push(this.generateFileHeader('API Methods'))
     methods.push('')
-    methods.push("import { APIClient } from './client.js'")
-    methods.push("import { RequestOptions } from './types.js'")
+    methods.push("import { APIClient } from './client'")
+    methods.push("import { RequestOptions } from './types'")
     methods.push('')
 
     methods.push('export class APIService {')
@@ -619,9 +619,9 @@ export interface APIError {
  * Default configuration and factory functions
  */
 
-import { APIClient } from './client.js'
-import { APIService } from './methods.js'
-import { APIClientConfig } from './types.js'
+import { APIClient } from './client'
+import { APIService } from './methods'
+import { APIClientConfig } from './types'
 
 export function createAPIClient(config: APIClientConfig): APIService {
   const client = new APIClient(config)
@@ -639,7 +639,8 @@ export const defaultConfig: Partial<APIClientConfig> = {
 
   private generateIndexFile(): string {
     const envVar = this.options.apiUrlEnvVar
-    const fallbackUrl = this.options.baseUrl || '/api'
+    // OpenAPI paths already include full path (e.g., /api/v1/...), so default to empty
+    const fallbackUrl = this.options.baseUrl ?? ''
     const authTokenKey = this.options.authTokenKey
 
     const authConfig = this.options.includeAuth && this.options.authType === 'bearer'
@@ -663,13 +664,13 @@ export const defaultConfig: Partial<APIClientConfig> = {
 
 /// <reference types="vite/client" />
 
-export * from './client.js'
-export * from './methods.js'
-export * from './types.js'
-export * from './config.js'
+export * from './client'
+export * from './methods'
+export * from './types'
+export * from './config'
 
 // Import createAPIClient explicitly for use below (export * doesn't hoist)
-import { createAPIClient } from './config.js'
+import { createAPIClient } from './config'
 
 // Environment variable for API URL (works with Vite, Next.js, CRA, etc.)
 // Vite uses import.meta.env, Next.js/CRA use process.env (bundler replaces at build time)

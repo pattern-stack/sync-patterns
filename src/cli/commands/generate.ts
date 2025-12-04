@@ -10,12 +10,17 @@ import { loadOpenAPISpec, parseOpenAPI } from '../../generators/parser.js'
 import { generateZodSchemas } from '../../generators/zod-generator.js'
 import { generateAPIClient } from '../../generators/client-generator.js'
 import { generateHooks } from '../../generators/hook-generator.js'
+import { generateCollections } from '../../generators/collection-generator.js'
+import { generateEntityWrappers } from '../../generators/entity-generator.js'
+import { generateConfig } from '../../generators/config-generator.js'
 
 export interface GenerateOptions {
   output: string
   schemas: boolean
   client: boolean
   hooks: boolean
+  collections: boolean
+  entities: boolean
   apiUrl?: string
   apiUrlEnv?: string
   timeout?: string
@@ -74,6 +79,13 @@ export async function generateCommand(
       }
       if (options.hooks) {
         console.log(`  - React hooks in ${options.output}/hooks/`)
+      }
+      if (options.collections) {
+        console.log(`  - TanStack DB collections in ${options.output}/collections/`)
+      }
+      if (options.entities) {
+        console.log(`  - Entity wrappers in ${options.output}/entities/`)
+        console.log(`  - Runtime config in ${options.output}/config.ts`)
       }
       return
     }
@@ -152,35 +164,124 @@ export async function generateCommand(
       console.log(`Written React hooks to ${hooksDir}/`)
     }
 
-    // Generate root index and types re-export
+    // Generate TanStack DB collections (for local_first: true entities)
+    if (options.collections) {
+      console.log('\nGenerating TanStack DB collections...')
+      const collections = generateCollections(parsed)
+
+      if (collections.collections.size > 0) {
+        const collectionsDir = join(options.output, 'collections')
+        await ensureDir(collectionsDir)
+
+        for (const [name, content] of collections.collections) {
+          const fileName = `${toKebabCase(name)}.ts`
+          const filePath = join(collectionsDir, fileName)
+          await writeFile(filePath, content)
+          if (options.verbose) {
+            console.log(`  Written: ${filePath}`)
+          }
+        }
+
+        await writeFile(join(collectionsDir, 'index.ts'), collections.index)
+        console.log(`Written ${collections.collections.size} collections to ${collectionsDir}/`)
+      } else {
+        console.log('  No local_first: true entities found, skipping collections')
+      }
+    }
+
+    // Generate runtime config
+    if (options.entities) {
+      console.log('\nGenerating runtime config...')
+      const configResult = generateConfig(parsed)
+      await writeFile(join(options.output, 'config.ts'), configResult.config)
+      console.log(`Written config to ${options.output}/config.ts`)
+    }
+
+    // Generate entity wrappers (the public API)
+    if (options.entities) {
+      console.log('\nGenerating entity wrappers...')
+      const entities = generateEntityWrappers(parsed)
+
+      if (entities.wrappers.size > 0) {
+        const entitiesDir = join(options.output, 'entities')
+        await ensureDir(entitiesDir)
+
+        for (const [name, content] of entities.wrappers) {
+          const fileName = `${toKebabCase(name)}.ts`
+          const filePath = join(entitiesDir, fileName)
+          await writeFile(filePath, content)
+          if (options.verbose) {
+            console.log(`  Written: ${filePath}`)
+          }
+        }
+
+        await writeFile(join(entitiesDir, 'index.ts'), entities.index)
+        await writeFile(join(entitiesDir, 'types.ts'), entities.types)
+        console.log(`Written ${entities.wrappers.size} entity wrappers to ${entitiesDir}/`)
+      } else {
+        console.log('  No entities with CRUD operations found')
+      }
+    }
+
+    // Generate root index
     console.log('\nGenerating root index...')
 
-    const rootIndex = `/**
- * Generated API Client & Types
- *
- * Auto-generated from OpenAPI specification
- * Do not edit manually - regenerate using sync-patterns CLI
- */
+    // Root index exports entities (public API) + schemas (types)
+    // Internal modules (client, hooks, collections) are NOT exported
+    const rootIndexLines: string[] = [
+      '/**',
+      ' * Generated API',
+      ' *',
+      ' * Auto-generated from OpenAPI specification',
+      ' * Do not edit manually - regenerate using sync-patterns CLI',
+      ' *',
+      ' * PUBLIC API:',
+      ' *   - Entity wrappers (entities/) - THE interface for all data operations',
+      ' *   - Schema types (schemas/) - TypeScript types for all entities',
+      ' *   - Config (config.ts) - Runtime configuration',
+      ' *',
+      ' * INTERNAL (do not import directly):',
+      ' *   - client/ - Low-level API client',
+      ' *   - hooks/ - TanStack Query hooks',
+      ' *   - collections/ - TanStack DB collections',
+      ' */',
+      '',
+    ]
 
-// Re-export all schemas/types
-export * from './schemas/index.js'
+    // Export entities if generated (the public API)
+    // Note: Entities re-export their related schema types, so we don't need to export schemas separately
+    if (options.entities) {
+      rootIndexLines.push('// Entity wrappers - THE public API for data operations')
+      rootIndexLines.push('// (Each entity module re-exports its related schema types)')
+      rootIndexLines.push("export * from './entities/index'")
+      rootIndexLines.push('')
+      rootIndexLines.push('// Runtime configuration')
+      rootIndexLines.push("export { configureSync, isLocalFirst, getElectricUrl, getSyncConfig } from './config'")
+      rootIndexLines.push('')
+    } else {
+      // No entities - export schemas and hooks directly
+      if (options.schemas) {
+        rootIndexLines.push('// Schema types')
+        rootIndexLines.push("export * from './schemas/index'")
+        rootIndexLines.push('')
+      }
+      if (options.hooks) {
+        rootIndexLines.push('// React hooks')
+        rootIndexLines.push("export * from './hooks/index'")
+        rootIndexLines.push('')
+      }
+    }
 
-// Re-export API client
-export * from './client/index.js'
+    await writeFile(join(options.output, 'index.ts'), rootIndexLines.join('\n'))
 
-// Re-export React hooks
-export * from './hooks/index.js'
-`
-    await writeFile(join(options.output, 'index.ts'), rootIndex)
-
-    // Generate a types.ts alias for backward compatibility
+    // Generate a types.ts alias for convenience
     const typesAlias = `/**
  * Type Re-exports
  *
  * Convenience re-export of all schema types
  */
 
-export * from './schemas/index.js'
+export * from './schemas/index'
 `
     await writeFile(join(options.output, 'types.ts'), typesAlias)
 
