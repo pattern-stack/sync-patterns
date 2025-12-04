@@ -223,7 +223,7 @@ describe('EntityGenerator', () => {
 
       expect(contactsCode).toContain('export type {')
       expect(contactsCode).toContain('Contact,')
-      expect(contactsCode).toContain("} from '../../schemas/index'")
+      expect(contactsCode).toContain("} from '../schemas/index'")
     })
 
     it('should not generate wrapper for entity without CRUD operations', () => {

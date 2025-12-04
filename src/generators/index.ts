@@ -18,6 +18,7 @@ export {
   type ParsedServer,
   type ParsedSecurity,
   type HTTPMethod,
+  type SyncMode,
 } from './parser.js'
 
 // Zod Schema Generator
@@ -104,3 +105,19 @@ export {
   type GeneratedEntityWrappers,
   type EntityGeneratorOptions,
 } from './entity-generator.js'
+
+// RxDB Schema Generator (for offline mode)
+export {
+  RxDBSchemaGenerator,
+  generateRxDBSchemas,
+  type GeneratedRxDBSchemas,
+  type RxDBSchemaGeneratorOptions,
+} from './rxdb-schema-generator.js'
+
+// RxDB Init Generator (for offline mode)
+export {
+  RxDBInitGenerator,
+  generateRxDBInit,
+  type GeneratedRxDBInit,
+  type RxDBInitGeneratorOptions,
+} from './rxdb-init-generator.js'

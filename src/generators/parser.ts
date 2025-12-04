@@ -30,6 +30,14 @@ export interface ParsedServer {
   variables?: Record<string, string>
 }
 
+/**
+ * Sync mode determines how data is synchronized
+ * - 'api': Server-only, uses TanStack Query (no local storage)
+ * - 'realtime': ElectricSQL + TanStack DB (in-memory, sub-ms reactivity)
+ * - 'offline': RxDB + IndexedDB (persistent, survives refresh)
+ */
+export type SyncMode = 'api' | 'realtime' | 'offline'
+
 export interface ParsedEndpoint {
   path: string
   method: HTTPMethod
@@ -41,8 +49,10 @@ export interface ParsedEndpoint {
   requestBody?: ParsedRequestBody
   responses: ParsedResponse[]
   security?: ParsedSecurity[]
-  // Sync extensions
-  syncMode?: 'push' | 'live' | 'cache'
+  // Sync extensions (new 3-mode format)
+  syncMode?: SyncMode
+  schemaVersion?: number
+  // Legacy sync extensions (backward compatibility)
   localFirst?: boolean
   syncConfig?: {
     localFirst: boolean
@@ -173,6 +183,9 @@ export class OpenAPIParser {
         const opSyncConfig = opExtensions['x-sync'] as Record<string, unknown> | undefined
         const syncConfig = opSyncConfig || pathSyncConfig
 
+        // Extract sync mode with backward compatibility
+        const extractedSyncMode = this.extractSyncMode(syncConfig)
+
         endpoints.push({
           path,
           method,
@@ -186,8 +199,10 @@ export class OpenAPIParser {
             : undefined,
           responses: this.parseResponses(operation.responses),
           security: operation.security ? this.parseOperationSecurity() : undefined,
-          // Sync extensions
-          syncMode: syncConfig?.mode as ParsedEndpoint['syncMode'],
+          // Sync extensions (new 3-mode format)
+          syncMode: extractedSyncMode,
+          schemaVersion: syncConfig?.schema_version as number | undefined,
+          // Legacy sync extensions (backward compatibility)
           localFirst: syncConfig?.local_first as boolean | undefined,
           syncConfig: syncConfig?.local_first !== undefined
             ? { localFirst: syncConfig.local_first as boolean }
@@ -355,6 +370,38 @@ export class OpenAPIParser {
   private parseOperationSecurity(): ParsedSecurity[] {
     // Simplified - would need to match with security schemes
     return []
+  }
+
+  /**
+   * Extract sync mode from x-sync extension with backward compatibility
+   *
+   * New format: x-sync.mode: 'api' | 'realtime' | 'offline'
+   * Legacy format: x-sync.local_first: true → 'realtime' (preserves existing behavior)
+   *                x-sync.local_first: false → 'api'
+   *
+   * Default: 'api' (server-only)
+   */
+  private extractSyncMode(syncConfig: Record<string, unknown> | undefined): SyncMode | undefined {
+    if (!syncConfig) return undefined
+
+    // New format: explicit mode
+    const mode = syncConfig.mode as string | undefined
+    if (mode === 'api' || mode === 'realtime' || mode === 'offline') {
+      return mode
+    }
+
+    // Legacy format: local_first boolean
+    // IMPORTANT: local_first: true maps to 'realtime' NOT 'offline'
+    // This preserves backward compatibility with existing ElectricSQL usage
+    const localFirst = syncConfig.local_first as boolean | undefined
+    if (localFirst === true) {
+      return 'realtime'
+    }
+    if (localFirst === false) {
+      return 'api'
+    }
+
+    return undefined
   }
 
   private mapOpenAPIType(type: string): ParsedSchema['type'] {

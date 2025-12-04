@@ -6,6 +6,7 @@
 
 import { Command } from 'commander'
 import { generateCommand } from './commands/generate.js'
+import { schemaCheckCommand } from './commands/schema-check.js'
 
 const program = new Command()
 
@@ -55,6 +56,17 @@ program
   .option('--verbose', 'Show detailed output')
   .action(generateCommand)
 
+// Schema check command
+program
+  .command('schema:check')
+  .description('Check for schema drift in offline mode entities')
+  .requiredOption('-i, --input <file>', 'OpenAPI specification file (required)')
+  .option('--fix', 'Update stored schema hashes')
+  .option('--strict', 'Exit with error code if drift detected (for CI)')
+  .option('--verbose', 'Show detailed output')
+  .option('--hash-file <file>', 'Custom hash file location')
+  .action(schemaCheckCommand)
+
 // Help command
 program
   .command('help')
@@ -66,16 +78,20 @@ sync-patterns CLI
 Generate typed clients from OpenAPI specs with Zod runtime validation.
 
 Commands:
-  generate <source>    Generate code from OpenAPI spec
-  help                 Show this help message
+  generate <source>      Generate code from OpenAPI spec
+  schema:check           Check for schema drift in offline mode entities
+  help                   Show this help message
 
 Examples:
   sync-patterns generate ./openapi.json
   sync-patterns generate ./openapi.json --output ./src/api
   sync-patterns generate https://api.example.com/openapi.json --dry-run
+  sync-patterns schema:check --input ./openapi.json
+  sync-patterns schema:check --input ./openapi.json --fix
 
 For more information:
   sync-patterns generate --help
+  sync-patterns schema:check --help
 `)
   })
 
