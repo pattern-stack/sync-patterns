@@ -55,6 +55,24 @@ export class ConfigGenerator {
     lines.push("export type SyncMode = 'api' | 'realtime' | 'offline'")
     lines.push('')
 
+    // ReplicationConfig interface
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Replication retry configuration for RxDB sync')
+      lines.push(' */')
+    }
+    lines.push('export interface ReplicationConfig {')
+    lines.push('  /** Starting delay in ms for retry backoff (default: 1000) */')
+    lines.push('  initialRetryDelay: number')
+    lines.push('  /** Maximum delay cap in ms (default: 300000 = 5min) */')
+    lines.push('  maxRetryDelay: number')
+    lines.push('  /** Multiplier for exponential backoff (default: 2) */')
+    lines.push('  backoffMultiplier: number')
+    lines.push('  /** Reset delay when browser comes online (default: true) */')
+    lines.push('  resetOnOnline: boolean')
+    lines.push('}')
+    lines.push('')
+
     // Type definition
     if (this.options.includeJSDoc) {
       lines.push('/**')
@@ -72,6 +90,28 @@ export class ConfigGenerator {
     lines.push('  defaultSyncMode: SyncMode')
     lines.push('  /** Per-entity sync mode configuration */')
     lines.push('  entities: Record<string, SyncMode>')
+    lines.push('  /** Replication retry configuration */')
+    lines.push('  replication: ReplicationConfig')
+    lines.push('  /** Callback when auth error occurs (401/403) */')
+    lines.push('  onAuthError?: () => void')
+    lines.push('  /** Callback when storage quota exceeded */')
+    lines.push('  onQuotaExceeded?: (entity: string, error: Error) => void')
+    lines.push('  /** Callback when sync error occurs */')
+    lines.push('  onSyncError?: (entity: string, error: Error) => void')
+    lines.push('}')
+    lines.push('')
+
+    // Default replication config
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Default replication configuration')
+      lines.push(' */')
+    }
+    lines.push('const defaultReplicationConfig: ReplicationConfig = {')
+    lines.push('  initialRetryDelay: 1000,')
+    lines.push('  maxRetryDelay: 300000,')
+    lines.push('  backoffMultiplier: 2,')
+    lines.push('  resetOnOnline: true,')
     lines.push('}')
     lines.push('')
 
@@ -98,6 +138,7 @@ export class ConfigGenerator {
     }
 
     lines.push('  },')
+    lines.push('  replication: defaultReplicationConfig,')
     lines.push('}')
     lines.push('')
 
@@ -129,6 +170,10 @@ export class ConfigGenerator {
     lines.push('    entities: {')
     lines.push('      ...config.entities,')
     lines.push('      ...overrides.entities,')
+    lines.push('    },')
+    lines.push('    replication: {')
+    lines.push('      ...config.replication,')
+    lines.push('      ...overrides.replication,')
     lines.push('    },')
     lines.push('  }')
     lines.push('}')
@@ -209,17 +254,96 @@ export class ConfigGenerator {
     lines.push('}')
     lines.push('')
 
+    // Token caching state
+    lines.push('// Cached token getter with refresh support')
+    lines.push('let cachedToken: string | null = null')
+    lines.push('let tokenExpiry: number = 0')
+    lines.push('')
+
     // getAuthToken function
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(' * Get the current auth token from localStorage')
+      lines.push(' * Get the current auth token from localStorage with caching')
       lines.push(' *')
-      lines.push(" * @returns Auth token or empty string if not found")
+      lines.push(' * @returns Auth token or empty string if not found')
       lines.push(' */')
     }
     lines.push('export function getAuthToken(): string {')
     lines.push("  if (typeof localStorage === 'undefined') return ''")
-    lines.push('  return localStorage.getItem(config.authTokenKey) ?? ""')
+    lines.push('')
+    lines.push('  const now = Date.now()')
+    lines.push('  if (cachedToken && tokenExpiry > now) {')
+    lines.push('    return cachedToken')
+    lines.push('  }')
+    lines.push('')
+    lines.push('  cachedToken = localStorage.getItem(config.authTokenKey) ?? ""')
+    lines.push('  // Assume 5 minute cache, actual expiry should be parsed from JWT')
+    lines.push('  tokenExpiry = now + 5 * 60 * 1000')
+    lines.push('  return cachedToken')
+    lines.push('}')
+    lines.push('')
+
+    // clearTokenCache function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Clear the cached auth token, forcing a fresh read on next getAuthToken()')
+      lines.push(' */')
+    }
+    lines.push('export function clearTokenCache(): void {')
+    lines.push('  cachedToken = null')
+    lines.push('  tokenExpiry = 0')
+    lines.push('}')
+    lines.push('')
+
+    // getReplicationConfig function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the current replication configuration')
+      lines.push(' *')
+      lines.push(' * @returns Replication config with retry settings')
+      lines.push(' */')
+    }
+    lines.push('export function getReplicationConfig(): ReplicationConfig {')
+    lines.push('  return { ...config.replication }')
+    lines.push('}')
+    lines.push('')
+
+    // getOnAuthError function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the configured auth error callback')
+      lines.push(' *')
+      lines.push(' * @returns Auth error callback if configured')
+      lines.push(' */')
+    }
+    lines.push('export function getOnAuthError(): (() => void) | undefined {')
+    lines.push('  return config.onAuthError')
+    lines.push('}')
+    lines.push('')
+
+    // getOnQuotaExceeded function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the configured quota exceeded callback')
+      lines.push(' *')
+      lines.push(' * @returns Quota exceeded callback if configured')
+      lines.push(' */')
+    }
+    lines.push('export function getOnQuotaExceeded(): ((entity: string, error: Error) => void) | undefined {')
+    lines.push('  return config.onQuotaExceeded')
+    lines.push('}')
+    lines.push('')
+
+    // getOnSyncError function
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Get the configured sync error callback')
+      lines.push(' *')
+      lines.push(' * @returns Sync error callback if configured')
+      lines.push(' */')
+    }
+    lines.push('export function getOnSyncError(): ((entity: string, error: Error) => void) | undefined {')
+    lines.push('  return config.onSyncError')
     lines.push('}')
     lines.push('')
 

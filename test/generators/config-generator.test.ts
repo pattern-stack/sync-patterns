@@ -33,6 +33,17 @@ describe('ConfigGenerator', () => {
       expect(result.config).toContain("export type SyncMode = 'api' | 'realtime' | 'offline'")
     })
 
+    it('should generate ReplicationConfig interface', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export interface ReplicationConfig')
+      expect(result.config).toContain('initialRetryDelay: number')
+      expect(result.config).toContain('maxRetryDelay: number')
+      expect(result.config).toContain('backoffMultiplier: number')
+      expect(result.config).toContain('resetOnOnline: boolean')
+    })
+
     it('should generate SyncConfig interface with 3-mode support', () => {
       const parsedAPI = createParsedAPI()
       const result = generateConfig(parsedAPI)
@@ -43,6 +54,21 @@ describe('ConfigGenerator', () => {
       expect(result.config).toContain('authTokenKey: string')
       expect(result.config).toContain('defaultSyncMode: SyncMode')
       expect(result.config).toContain('entities: Record<string, SyncMode>')
+      expect(result.config).toContain('replication: ReplicationConfig')
+      expect(result.config).toContain('onAuthError?: () => void')
+      expect(result.config).toContain('onQuotaExceeded?: (entity: string, error: Error) => void')
+      expect(result.config).toContain('onSyncError?: (entity: string, error: Error) => void')
+    })
+
+    it('should generate defaultReplicationConfig constant', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('const defaultReplicationConfig: ReplicationConfig')
+      expect(result.config).toContain('initialRetryDelay: 1000')
+      expect(result.config).toContain('maxRetryDelay: 300000')
+      expect(result.config).toContain('backoffMultiplier: 2')
+      expect(result.config).toContain('resetOnOnline: true')
     })
 
     it('should generate configureSync function', () => {
@@ -50,6 +76,15 @@ describe('ConfigGenerator', () => {
       const result = generateConfig(parsedAPI)
 
       expect(result.config).toContain('export function configureSync(overrides: Partial<SyncConfig>): void')
+    })
+
+    it('should merge replication config in configureSync', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('replication: {')
+      expect(result.config).toContain('...config.replication,')
+      expect(result.config).toContain('...overrides.replication,')
     })
 
     it('should generate getSyncMode function', () => {
@@ -85,12 +120,57 @@ describe('ConfigGenerator', () => {
       expect(result.config).toContain('return config.apiUrl')
     })
 
-    it('should generate getAuthToken function', () => {
+    it('should generate getAuthToken function with caching', () => {
       const parsedAPI = createParsedAPI()
       const result = generateConfig(parsedAPI)
 
       expect(result.config).toContain('export function getAuthToken(): string')
+      expect(result.config).toContain('let cachedToken: string | null = null')
+      expect(result.config).toContain('let tokenExpiry: number = 0')
+      expect(result.config).toContain('if (cachedToken && tokenExpiry > now)')
       expect(result.config).toContain('localStorage.getItem(config.authTokenKey)')
+      expect(result.config).toContain('tokenExpiry = now + 5 * 60 * 1000')
+    })
+
+    it('should generate clearTokenCache function', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export function clearTokenCache(): void')
+      expect(result.config).toContain('cachedToken = null')
+      expect(result.config).toContain('tokenExpiry = 0')
+    })
+
+    it('should generate getReplicationConfig function', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export function getReplicationConfig(): ReplicationConfig')
+      expect(result.config).toContain('return { ...config.replication }')
+    })
+
+    it('should generate getOnAuthError function', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export function getOnAuthError(): (() => void) | undefined')
+      expect(result.config).toContain('return config.onAuthError')
+    })
+
+    it('should generate getOnQuotaExceeded function', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export function getOnQuotaExceeded(): ((entity: string, error: Error) => void) | undefined')
+      expect(result.config).toContain('return config.onQuotaExceeded')
+    })
+
+    it('should generate getOnSyncError function', () => {
+      const parsedAPI = createParsedAPI()
+      const result = generateConfig(parsedAPI)
+
+      expect(result.config).toContain('export function getOnSyncError(): ((entity: string, error: Error) => void) | undefined')
+      expect(result.config).toContain('return config.onSyncError')
     })
 
     it('should generate getSyncConfig function', () => {
@@ -167,6 +247,7 @@ describe('ConfigGenerator', () => {
       expect(result.config).toContain("apiUrl: import.meta.env?.VITE_API_URL ?? '/api/v1'")
       expect(result.config).toContain("authTokenKey: 'auth_token'")
       expect(result.config).toContain("defaultSyncMode: 'api'")
+      expect(result.config).toContain('replication: defaultReplicationConfig')
     })
 
     it('should include JSDoc comments when includeJSDoc is true', () => {
