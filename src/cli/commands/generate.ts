@@ -169,12 +169,24 @@ export async function generateCommand(
       console.log('\nGenerating TanStack DB collections...')
       const collections = generateCollections(parsed)
 
-      if (collections.collections.size > 0) {
+      const totalCollections = collections.realtimeCollections.size + collections.offlineCollections.size
+      if (totalCollections > 0) {
         const collectionsDir = join(options.output, 'collections')
         await ensureDir(collectionsDir)
 
-        for (const [name, content] of collections.collections) {
-          const fileName = `${toKebabCase(name)}.ts`
+        // Write realtime collections (ElectricSQL)
+        for (const [name, content] of collections.realtimeCollections) {
+          const fileName = `${toKebabCase(name)}.realtime.ts`
+          const filePath = join(collectionsDir, fileName)
+          await writeFile(filePath, content)
+          if (options.verbose) {
+            console.log(`  Written: ${filePath}`)
+          }
+        }
+
+        // Write offline collections (RxDB)
+        for (const [name, content] of collections.offlineCollections) {
+          const fileName = `${toKebabCase(name)}.offline.ts`
           const filePath = join(collectionsDir, fileName)
           await writeFile(filePath, content)
           if (options.verbose) {
@@ -183,7 +195,7 @@ export async function generateCommand(
         }
 
         await writeFile(join(collectionsDir, 'index.ts'), collections.index)
-        console.log(`Written ${collections.collections.size} collections to ${collectionsDir}/`)
+        console.log(`Written ${totalCollections} collections to ${collectionsDir}/`)
       } else {
         console.log('  No local_first: true entities found, skipping collections')
       }
