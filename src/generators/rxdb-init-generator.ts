@@ -6,7 +6,7 @@
  *
  * Key design:
  * - Uses real RxDB v16 replicateRxCollection API (not fictional)
- * - Push handler receives docs[] array
+ * - Push handler receives RxReplicationWriteToMasterRow[] with newDocumentState/assumedMasterState
  * - Pull handler receives (checkpoint, batchSize) and returns {documents, checkpoint}
  * - Supports exponential backoff with online reset
  */
@@ -109,7 +109,7 @@ export class RxDBInitGenerator {
     lines.push("import { createRxDatabase, addRxPlugin, RxDatabase, RxCollection } from 'rxdb'")
     lines.push("import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'")
     lines.push("import { RxDBLeaderElectionPlugin } from 'rxdb/plugins/leader-election'")
-    lines.push("import { replicateRxCollection, RxReplicationState } from 'rxdb/plugins/replication'")
+    lines.push("import { replicateRxCollection, RxReplicationState, RxReplicationWriteToMasterRow } from 'rxdb/plugins/replication'")
     lines.push("import { apiRequest, ApiRequestError } from './api-helper'")
     lines.push(
       "import { getApiUrl, getReplicationConfig, getOnAuthError, getOnSyncError, clearTokenCache } from '../config'"
@@ -252,7 +252,7 @@ export class RxDBInitGenerator {
       lines.push(' * Create replication state for a single collection')
       lines.push(' * Uses the real RxDB v16 replicateRxCollection API')
       lines.push(' *')
-      lines.push(' * Push handler: receives docs array, sends to server, returns conflicts')
+      lines.push(' * Push handler: receives RxReplicationWriteToMasterRow[] with newDocumentState/assumedMasterState')
       lines.push(' * Pull handler: receives (checkpoint, batchSize), returns {documents, checkpoint}')
       lines.push(' */')
     }
@@ -273,29 +273,24 @@ export class RxDBInitGenerator {
     lines.push('      batchSize: 10,')
     lines.push('      /**')
     lines.push('       * Push handler - sends local changes to server')
-    lines.push('       * @param docs Array of documents to push (RxDB v16 API)')
+    lines.push('       * @param rows RxReplicationWriteToMasterRow[] - each row has newDocumentState and assumedMasterState')
     lines.push('       * @returns Array of conflicting documents (empty if no conflicts)')
     lines.push('       */')
-    lines.push('      async handler(docs) {')
+    lines.push('      async handler(rows: RxReplicationWriteToMasterRow<T>[]) {')
     lines.push('        const conflicts: T[] = []')
     lines.push('')
-    lines.push('        for (const doc of docs) {')
+    lines.push('        for (const row of rows) {')
+    lines.push('          const doc = row.newDocumentState')
     lines.push('          try {')
     lines.push('            if (doc._deleted) {')
     lines.push('              // Delete')
     lines.push('              await apiRequest(\'DELETE\', `${apiUrl}/${entityName}/${doc.id}`)')
+    lines.push('            } else if (!row.assumedMasterState) {')
+    lines.push('              // New document - assumedMasterState is null/undefined')
+    lines.push('              await apiRequest(\'POST\', `${apiUrl}/${entityName}`, doc)')
     lines.push('            } else {')
-    lines.push('              // Upsert - try PATCH first, fall back to POST')
-    lines.push('              try {')
-    lines.push('                await apiRequest(\'PATCH\', `${apiUrl}/${entityName}/${doc.id}`, doc)')
-    lines.push('              } catch (err) {')
-    lines.push('                if ((err as ApiRequestError).status === 404) {')
-    lines.push('                  // Document doesn\'t exist, create it')
-    lines.push('                  await apiRequest(\'POST\', `${apiUrl}/${entityName}`, doc)')
-    lines.push('                } else {')
-    lines.push('                  throw err')
-    lines.push('                }')
-    lines.push('              }')
+    lines.push('              // Update existing document')
+    lines.push('              await apiRequest(\'PATCH\', `${apiUrl}/${entityName}/${doc.id}`, doc)')
     lines.push('            }')
     lines.push('          } catch (err) {')
     lines.push('            const error = err as ApiRequestError')
