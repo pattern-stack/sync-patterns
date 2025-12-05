@@ -287,17 +287,15 @@ export class EntitiesHookGenerator {
     const hooks: string[] = []
     const types: string[] = []
 
-    // Hooks
-    if (entity.hasList) hooks.push(`use${entity.pascalNamePlural}`)
+    // Hooks - entity-generator uses use${PascalName}s (just adds 's'), not proper pluralization
+    if (entity.hasList) hooks.push(`use${entity.pascalName}s`)
     if (entity.hasGet) hooks.push(`use${entity.pascalName}`)
     if (entity.hasCreate) hooks.push(`useCreate${entity.pascalName}`)
     if (entity.hasUpdate) hooks.push(`useUpdate${entity.pascalName}`)
     if (entity.hasDelete) hooks.push(`useDelete${entity.pascalName}`)
 
-    // Types for type safety
+    // Types for type safety - only import the entity type (create/update may not exist)
     types.push(entity.entityType)
-    if (entity.createType) types.push(entity.createType)
-    if (entity.updateType) types.push(entity.updateType)
 
     return { hooks, types }
   }
@@ -426,10 +424,10 @@ export class EntitiesHookGenerator {
     lines.push('')
     lines.push('  // Build entity APIs with full type safety')
 
-    // Build each entity API
+    // Build each entity API - use pascalName + 's' for list hook (matches entity-generator)
     for (const entity of entities) {
       lines.push(`  const ${entity.namePlural}Api: ${entity.pascalNamePlural}Api = {`)
-      lines.push(`    useList: use${entity.pascalNamePlural},`)
+      lines.push(`    useList: use${entity.pascalName}s,`)
       lines.push(`    useOne: use${entity.pascalName},`)
       lines.push(`    useMetadata: createMetadataHook('${entity.namePlural}'),`)
       if (entity.hasCreate) lines.push(`    create: ${entity.namePlural}Create,`)

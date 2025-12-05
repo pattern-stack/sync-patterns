@@ -346,7 +346,7 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain('useContacts') // plural
     })
 
-    it('should handle -ies plurals', () => {
+    it('should handle -ies plurals with entity-generator naming', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({ path: '/activities', method: 'get', operationId: 'list_activities' }),
@@ -356,8 +356,9 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      expect(result.code).toContain('useActivity')   // singular
-      expect(result.code).toContain('useActivities') // plural
+      // entity-generator uses use${PascalName}s (just adds 's'), not proper pluralization
+      expect(result.code).toContain('useActivity')  // singular
+      expect(result.code).toContain('useActivitys') // pascalName + 's' (matches entity-generator)
     })
   })
 })
