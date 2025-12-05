@@ -232,48 +232,120 @@ export class CollectionGenerator {
     const lines: string[] = []
     const singularName = this.singularize(entityName)
     const pascalSingular = this.toPascalCase(singularName)
-    const camelName = this.toCamelCase(entityName)
     const kebabName = this.toKebabCase(entityName)
-    const collectionName = `${camelName}OfflineCollection`
 
     // File header
-    lines.push(this.generateFileHeader(`${pascalSingular} Offline`))
+    lines.push(this.generateFileHeader(`${pascalSingular} Offline Collection`))
     lines.push('')
 
-    // Imports
-    lines.push("import { createCollection } from '@tanstack/db'")
-    lines.push("import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'")
-    lines.push("import { getRxDatabase } from '../db/rxdb-init'")
-    lines.push(`import type { ${pascalSingular}Document } from '../db/schemas/${kebabName}.schema'`)
+    // Imports - use RxDB directly, not TanStack DB wrapper
+    lines.push("import { getRxDatabase } from '../rxdb/database'")
+    lines.push(`import type { ${pascalSingular}Document } from '../schemas/${kebabName}.rxdb-schema'`)
+    lines.push("import type { RxCollection } from 'rxdb'")
     lines.push('')
 
-    // JSDoc for collection
+    // Collection cache
+    lines.push(`let collectionCache: RxCollection<${pascalSingular}Document> | null = null`)
+    lines.push('')
+
+    // getCollection helper
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * TanStack DB RxDB offline collection for ${pascalSingular}`)
-      lines.push(' *')
-      lines.push(' * Features:')
-      lines.push(' * - Persistent storage via IndexedDB')
-      lines.push(' * - Survives browser refresh')
-      lines.push(' * - Background sync when online')
-      lines.push(' * - Optimistic mutations')
-      lines.push(' *')
-      if (endpoint.summary) {
-        lines.push(` * ${endpoint.summary}`)
-      }
+      lines.push(` * Get the ${entityName} RxDB collection`)
+      lines.push(' * Initializes the database if needed')
       lines.push(' */')
     }
+    lines.push(`export async function get${pascalSingular}sOfflineCollection(): Promise<`)
+    lines.push(`  RxCollection<${pascalSingular}Document>`)
+    lines.push('> {')
+    lines.push('  if (!collectionCache) {')
+    lines.push('    const db = await getRxDatabase()')
+    lines.push(`    collectionCache = db.${entityName}`)
+    lines.push('  }')
+    lines.push('  return collectionCache')
+    lines.push('}')
+    lines.push('')
 
-    // Generate collection
-    lines.push(`export const ${collectionName} = createCollection<${pascalSingular}Document>(`)
-    lines.push('  rxdbCollectionOptions({')
-    lines.push('    getRxCollection: async () => {')
-    lines.push('      const db = await getRxDatabase()')
-    lines.push(`      return db.${entityName}`)
+    // createOffline helper
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Create a new ${singularName} in the offline collection`)
+      lines.push(' */')
+    }
+    lines.push(`export async function createOffline${pascalSingular}(`)
+    lines.push(`  data: Omit<${pascalSingular}Document, 'id' | 'created_at' | 'updated_at'>`)
+    lines.push(`): Promise<${pascalSingular}Document> {`)
+    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
+    lines.push('  const now = new Date().toISOString()')
+    lines.push('')
+    lines.push('  const doc = await collection.insert({')
+    lines.push('    ...data,')
+    lines.push('    id: crypto.randomUUID(),')
+    lines.push('    created_at: now,')
+    lines.push('    updated_at: now,')
+    lines.push(`  } as ${pascalSingular}Document)`)
+    lines.push('')
+    lines.push('  return doc.toJSON()')
+    lines.push('}')
+    lines.push('')
+
+    // updateOffline helper
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Update a ${singularName} in the offline collection`)
+      lines.push(' */')
+    }
+    lines.push(`export async function updateOffline${pascalSingular}(`)
+    lines.push('  id: string,')
+    lines.push(`  data: Partial<${pascalSingular}Document>`)
+    lines.push(`): Promise<${pascalSingular}Document> {`)
+    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
+    lines.push('  const doc = await collection.findOne(id).exec()')
+    lines.push('')
+    lines.push('  if (!doc) {')
+    lines.push(`    throw new Error(\`${pascalSingular} \${id} not found\`)`)
+    lines.push('  }')
+    lines.push('')
+    lines.push('  await doc.update({')
+    lines.push('    $set: {')
+    lines.push('      ...data,')
+    lines.push('      updated_at: new Date().toISOString(),')
     lines.push('    },')
-    lines.push('    getKey: (item) => item.id,')
     lines.push('  })')
-    lines.push(')')
+    lines.push('')
+    lines.push('  return doc.toJSON()')
+    lines.push('}')
+    lines.push('')
+
+    // deleteOffline helper
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Delete a ${singularName} from the offline collection`)
+      lines.push(' */')
+    }
+    lines.push(`export async function deleteOffline${pascalSingular}(id: string): Promise<void> {`)
+    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
+    lines.push('  const doc = await collection.findOne(id).exec()')
+    lines.push('')
+    lines.push('  if (!doc) {')
+    lines.push(`    throw new Error(\`${pascalSingular} \${id} not found\`)`)
+    lines.push('  }')
+    lines.push('')
+    lines.push('  await doc.remove()')
+    lines.push('}')
+    lines.push('')
+
+    // getAllOffline helper
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Get all ${entityName} from the offline collection`)
+      lines.push(' */')
+    }
+    lines.push(`export async function getAllOffline${pascalSingular}s(): Promise<${pascalSingular}Document[]> {`)
+    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
+    lines.push('  const docs = await collection.find().exec()')
+    lines.push('  return docs.map((doc) => doc.toJSON())')
+    lines.push('}')
     lines.push('')
 
     return lines.join('\n')
@@ -304,13 +376,20 @@ export class CollectionGenerator {
       lines.push('')
     }
 
-    // Export offline collections
+    // Export offline collections (RxDB helpers)
     if (offlineEntities.length > 0) {
       lines.push('// Offline collections (RxDB - IndexedDB, persistent)')
       for (const entityName of offlineEntities.sort()) {
-        const camelName = this.toCamelCase(entityName)
+        const singularName = this.singularize(entityName)
+        const pascalSingular = this.toPascalCase(singularName)
         const fileName = this.toKebabCase(entityName)
-        lines.push(`export { ${camelName}OfflineCollection } from './${fileName}.offline'`)
+        lines.push(`export {`)
+        lines.push(`  get${pascalSingular}sOfflineCollection,`)
+        lines.push(`  createOffline${pascalSingular},`)
+        lines.push(`  updateOffline${pascalSingular},`)
+        lines.push(`  deleteOffline${pascalSingular},`)
+        lines.push(`  getAllOffline${pascalSingular}s,`)
+        lines.push(`} from './${fileName}.offline'`)
       }
       lines.push('')
     }
