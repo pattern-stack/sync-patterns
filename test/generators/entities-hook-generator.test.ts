@@ -77,7 +77,7 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain('useDeleteContact')
     })
 
-    it('should generate EntityApi interface with 4 type params and useMetadata', () => {
+    it('should generate EntityApi interface with useMetadata', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({ path: '/contacts', method: 'get', operationId: 'list_contacts' }),
@@ -86,17 +86,13 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      // EntityApi interface with 4 type params (matching spec)
-      expect(result.code).toContain('export interface EntityApi<')
-      expect(result.code).toContain('TList = unknown,')
-      expect(result.code).toContain('TOne = unknown,')
-      expect(result.code).toContain('TCreate = unknown,')
-      expect(result.code).toContain('TUpdate = unknown')
-      expect(result.code).toContain('useList: () => UnifiedQueryResult<TList[]>')
-      expect(result.code).toContain('useOne: (id: string) => UnifiedQueryResult<TOne | undefined>')
+      // EntityApi interface (simplified - uses any for entity-agnostic access)
+      expect(result.code).toContain('export interface EntityApi {')
+      expect(result.code).toContain('useList: () => UnifiedQueryResult<any[]>')
+      expect(result.code).toContain('useOne: (id: string) => UnifiedQueryResult<any>')
       expect(result.code).toContain("useMetadata: (view?: 'list' | 'detail' | 'form') => MetadataResult")
-      expect(result.code).toContain('create?: UnifiedMutationResult<TOne, TCreate>')
-      expect(result.code).toContain('update?: UnifiedMutationResult<TOne, { id: string; data: TUpdate }>')
+      expect(result.code).toContain('create?: UnifiedMutationResult<any, any>')
+      expect(result.code).toContain('update?: UnifiedMutationResult<any, any>')
       expect(result.code).toContain('delete?: UnifiedMutationResult<void, string>')
 
       // MetadataResult interface
@@ -105,7 +101,7 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain('isLoading: boolean')
     })
 
-    it('should generate Entities interface with typed aliases', () => {
+    it('should generate Entities interface', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({ path: '/accounts', method: 'get', operationId: 'list_accounts' }),
@@ -115,14 +111,10 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      // Typed aliases
-      expect(result.code).toContain('export type AccountsApi = EntityApi<Account')
-      expect(result.code).toContain('export type ContactsApi = EntityApi<Contact')
-
-      // Entities interface uses typed aliases
+      // Entities interface uses generic EntityApi
       expect(result.code).toContain('export interface Entities {')
-      expect(result.code).toContain('accounts: AccountsApi')
-      expect(result.code).toContain('contacts: ContactsApi')
+      expect(result.code).toContain('accounts: EntityApi')
+      expect(result.code).toContain('contacts: EntityApi')
       expect(result.code).toContain('get: (name: string) => EntityApi | undefined')
     })
 
@@ -143,7 +135,7 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain('const contactsDelete = useDeleteContact()')
     })
 
-    it('should build entity API objects with typed aliases and metadata', () => {
+    it('should build entity API objects with metadata', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({ path: '/contacts', method: 'get', operationId: 'list_contacts' }),
@@ -159,7 +151,7 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain('useEntityData(entityName, { view })')
 
       // Entity API with useMetadata
-      expect(result.code).toContain('const contactsApi: ContactsApi = {')
+      expect(result.code).toContain('const contactsApi: EntityApi = {')
       expect(result.code).toContain('useList: useContacts,')
       expect(result.code).toContain('useOne: useContact,')
       expect(result.code).toContain("useMetadata: createMetadataHook('contacts'),")
@@ -207,8 +199,8 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      expect(result.code).not.toContain('HealthApi')
-      expect(result.code).toContain('contacts: ContactsApi')
+      expect(result.code).not.toContain('health:')
+      expect(result.code).toContain('contacts: EntityApi')
     })
 
     it('should handle multiple entities correctly', () => {
@@ -272,7 +264,7 @@ describe('EntitiesHookGenerator', () => {
       const result = generateEntitiesHook(parsedAPI, { includeJSDoc: true })
 
       expect(result.code).toContain('/**')
-      expect(result.code).toContain('* Generic entity API shape with full type safety.')
+      expect(result.code).toContain('* Generic entity API shape for entity-agnostic access.')
       expect(result.code).toContain('* Access all entity APIs with full TypeScript support.')
     })
 
@@ -300,8 +292,7 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      expect(result.code).toContain('users: UsersApi')
-      expect(result.code).toContain('export type UsersApi = EntityApi<User')
+      expect(result.code).toContain('users: EntityApi')
     })
 
     it('should skip api version prefixes', () => {
@@ -313,9 +304,9 @@ describe('EntitiesHookGenerator', () => {
 
       const result = generateEntitiesHook(parsedAPI)
 
-      expect(result.code).toContain('users: UsersApi')
-      expect(result.code).not.toContain('ApiApi')
-      expect(result.code).not.toContain('V1Api')
+      expect(result.code).toContain('users: EntityApi')
+      expect(result.code).not.toContain('api:')
+      expect(result.code).not.toContain('v1:')
     })
 
     it('should handle kebab-case paths', () => {

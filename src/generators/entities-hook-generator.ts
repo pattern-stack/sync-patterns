@@ -265,27 +265,20 @@ export class EntitiesHookGenerator {
     lines.push("import type { UnifiedQueryResult, UnifiedMutationResult } from './entities/types'")
     lines.push('')
 
-    // Import from each entity (hooks + types)
+    // Import hooks from each entity (no type imports - use generic EntityApi)
     for (const entity of entities) {
-      const { hooks, types } = this.getEntityImports(entity)
+      const { hooks } = this.getEntityImports(entity)
 
-      // Hooks import
       if (hooks.length > 0) {
         lines.push(`import { ${hooks.join(', ')} } from './entities/${this.toKebabCase(entity.namePlural)}'`)
-      }
-
-      // Types import (separate line for type-only imports)
-      if (types.length > 0) {
-        lines.push(`import type { ${types.join(', ')} } from './entities/${this.toKebabCase(entity.namePlural)}'`)
       }
     }
 
     return lines.join('\n')
   }
 
-  private getEntityImports(entity: EntityInfo): { hooks: string[]; types: string[] } {
+  private getEntityImports(entity: EntityInfo): { hooks: string[] } {
     const hooks: string[] = []
-    const types: string[] = []
 
     // Hooks - entity-generator uses use${PascalName}s (just adds 's'), not proper pluralization
     if (entity.hasList) hooks.push(`use${entity.pascalName}s`)
@@ -294,10 +287,9 @@ export class EntitiesHookGenerator {
     if (entity.hasUpdate) hooks.push(`useUpdate${entity.pascalName}`)
     if (entity.hasDelete) hooks.push(`useDelete${entity.pascalName}`)
 
-    // Types for type safety - only import the entity type (create/update may not exist)
-    types.push(entity.entityType)
-
-    return { hooks, types }
+    // Don't import types - the entity files handle their own type safety
+    // The aggregator uses generic EntityApi to avoid type mismatches
+    return { hooks }
   }
 
   private generateEntityApiType(): string {
@@ -312,34 +304,32 @@ export class EntitiesHookGenerator {
 
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(' * Generic entity API shape with full type safety.')
+      lines.push(' * Generic entity API shape for entity-agnostic access.')
       lines.push(' *')
-      lines.push(' * @typeParam TList - List response type (e.g., AccountOwner)')
-      lines.push(' * @typeParam TOne - Single entity type (e.g., AccountOwner)')
-      lines.push(' * @typeParam TCreate - Create input type (e.g., AccountCreate)')
-      lines.push(' * @typeParam TUpdate - Update input type (e.g., AccountUpdate)')
+      lines.push(' * For full type safety, import hooks directly from entity modules:')
+      lines.push(" * import { useAccounts, useCreateAccount } from './entities/accounts'")
       lines.push(' *')
       lines.push(' * Queries are hook references (consumer calls them).')
       lines.push(' * Mutations are results (already called inside useEntities).')
       lines.push(' */')
     }
 
-    lines.push('export interface EntityApi<')
-    lines.push('  TList = unknown,')
-    lines.push('  TOne = unknown,')
-    lines.push('  TCreate = unknown,')
-    lines.push('  TUpdate = unknown')
-    lines.push('> {')
+    lines.push('// eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push('export interface EntityApi {')
     lines.push('  /** Fetch all entities - hook reference, consumer calls */')
-    lines.push('  useList: () => UnifiedQueryResult<TList[]>')
+    lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push('  useList: () => UnifiedQueryResult<any[]>')
     lines.push('  /** Fetch single entity by ID - hook reference, consumer calls */')
-    lines.push('  useOne: (id: string) => UnifiedQueryResult<TOne | undefined>')
+    lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push('  useOne: (id: string) => UnifiedQueryResult<any>')
     lines.push('  /** Fetch column metadata - hook reference, consumer calls */')
     lines.push("  useMetadata: (view?: 'list' | 'detail' | 'form') => MetadataResult")
     lines.push('  /** Create mutation - result, already initialized */')
-    lines.push('  create?: UnifiedMutationResult<TOne, TCreate>')
+    lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push('  create?: UnifiedMutationResult<any, any>')
     lines.push('  /** Update mutation - result, already initialized */')
-    lines.push('  update?: UnifiedMutationResult<TOne, { id: string; data: TUpdate }>')
+    lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push('  update?: UnifiedMutationResult<any, any>')
     lines.push('  /** Delete mutation - result, already initialized */')
     lines.push('  delete?: UnifiedMutationResult<void, string>')
     lines.push('}')
@@ -350,25 +340,18 @@ export class EntitiesHookGenerator {
   private generateEntitiesInterface(entities: EntityInfo[]): string {
     const lines: string[] = []
 
-    // Generate typed API aliases for each entity (4 type params: TList, TOne, TCreate, TUpdate)
-    for (const entity of entities) {
-      const createType = entity.createType || 'never'
-      const updateType = entity.updateType || 'never'
-      // Most entities use same type for list and single
-      lines.push(`export type ${entity.pascalNamePlural}Api = EntityApi<${entity.entityType}, ${entity.entityType}, ${createType}, ${updateType}>`)
-    }
-    lines.push('')
-
     if (this.options.includeJSDoc) {
       lines.push('/**')
       lines.push(' * Complete entities interface with typed access and dynamic lookup.')
+      lines.push(' * For full type safety, import hooks directly from entity modules.')
       lines.push(' */')
     }
 
     lines.push('export interface Entities {')
     for (const entity of entities) {
-      lines.push(`  ${entity.namePlural}: ${entity.pascalNamePlural}Api`)
+      lines.push(`  ${entity.namePlural}: EntityApi`)
     }
+    lines.push('  /** Dynamic entity lookup by name */')
     lines.push('  get: (name: string) => EntityApi | undefined')
     lines.push('}')
 
@@ -426,7 +409,7 @@ export class EntitiesHookGenerator {
 
     // Build each entity API - use pascalName + 's' for list hook (matches entity-generator)
     for (const entity of entities) {
-      lines.push(`  const ${entity.namePlural}Api: ${entity.pascalNamePlural}Api = {`)
+      lines.push(`  const ${entity.namePlural}Api: EntityApi = {`)
       lines.push(`    useList: use${entity.pascalName}s,`)
       lines.push(`    useOne: use${entity.pascalName},`)
       lines.push(`    useMetadata: createMetadataHook('${entity.namePlural}'),`)

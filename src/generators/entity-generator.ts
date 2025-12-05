@@ -802,6 +802,8 @@ export class EntityGenerator {
     lines.push('  data: T | undefined')
     lines.push('  isLoading: boolean')
     lines.push('  error: Error | null')
+    lines.push('  /** Refetch data. No-op in realtime mode (data auto-updates). */')
+    lines.push('  refetch?: () => void')
     lines.push('}')
     lines.push('')
 
