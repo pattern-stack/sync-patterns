@@ -140,7 +140,8 @@ export class CollectionGenerator {
       "import { electricCollectionOptions } from '@tanstack/electric-db-collection'"
     )
     lines.push("import { getElectricUrl, getApiUrl, getAuthToken } from '../config'")
-    lines.push(`import type { ${pascalSingular} } from '../schemas/${kebabName}.schema'`)
+    // Import from entity barrel (e.g., accounts.ts) which exports the primary type alias
+    lines.push(`import type { ${pascalSingular} } from '../schemas/${entityName}'`)
     lines.push('')
 
     // JSDoc for collection

@@ -10,6 +10,8 @@ import type { ParsedOpenAPI, ParsedSchema } from './parser.js'
 export interface GeneratedZodSchemas {
   /** Map of schema name to generated code */
   schemas: Map<string, string>
+  /** Entity barrel files (e.g., accounts.ts re-exports Account types) */
+  entityBarrels: Map<string, string>
   /** Combined index file */
   index: string
 }
@@ -61,10 +63,13 @@ export class ZodSchemaGenerator {
       this.generatedSchemas.add(schema.name)
     }
 
+    // Generate entity barrel files
+    const entityBarrels = this.generateEntityBarrels(parsedAPI.schemas)
+
     // Generate index file
     const index = this.generateIndexFile(parsedAPI.schemas)
 
-    return { schemas, index }
+    return { schemas, entityBarrels, index }
   }
 
   private buildRefMap(parsedAPI: ParsedOpenAPI) {
@@ -354,6 +359,120 @@ export class ZodSchemaGenerator {
     lines.push('')
 
     return lines.join('\n')
+  }
+
+  /**
+   * Generate entity barrel files that group related schemas.
+   * E.g., AccountOwner, AccountCreate, AccountUpdate → accounts.ts
+   */
+  private generateEntityBarrels(schemas: ParsedSchema[]): Map<string, string> {
+    const barrels = new Map<string, string>()
+
+    // Group schemas by entity
+    const entityGroups = new Map<string, { schemas: string[], primaryType: string | null }>()
+
+    for (const schema of schemas) {
+      if (!schema.name) continue
+
+      const entityName = this.extractEntityFromSchemaName(schema.name)
+      if (!entityName) continue
+
+      if (!entityGroups.has(entityName)) {
+        entityGroups.set(entityName, { schemas: [], primaryType: null })
+      }
+
+      const group = entityGroups.get(entityName)!
+      group.schemas.push(schema.name)
+
+      // Determine primary type (prefer Owner > Response > base name)
+      if (schema.name === this.toPascalCase(entityName) + 'Owner') {
+        group.primaryType = schema.name
+      } else if (!group.primaryType && schema.name === this.toPascalCase(entityName) + 'Response') {
+        group.primaryType = schema.name
+      } else if (!group.primaryType && schema.name === this.toPascalCase(entityName)) {
+        group.primaryType = schema.name
+      }
+    }
+
+    // Generate barrel files for entities with multiple schemas
+    for (const [entityName, group] of entityGroups) {
+      if (group.schemas.length < 2) continue  // Skip single-schema entities
+
+      const lines: string[] = []
+      const pluralEntityName = this.pluralize(entityName)
+      const pascalSingular = this.toPascalCase(entityName)
+
+      lines.push(this.generateFileHeader(`${pascalSingular} Entity Schemas`))
+      lines.push('')
+
+      // Import the primary type first (if we have one)
+      if (group.primaryType) {
+        const primaryFileName = this.toKebabCase(group.primaryType)
+        lines.push(`import type { ${group.primaryType} as _Primary${pascalSingular} } from './${primaryFileName}.schema'`)
+        lines.push('')
+      }
+
+      lines.push('/**')
+      lines.push(` * Barrel file for all ${pascalSingular} related schemas.`)
+      lines.push(` * Import from this file for unified ${pascalSingular} types.`)
+      lines.push(' */')
+      lines.push('')
+
+      // Re-export all schemas
+      for (const schemaName of group.schemas.sort()) {
+        const fileName = this.toKebabCase(schemaName)
+        lines.push(`export * from './${fileName}.schema'`)
+      }
+
+      // Add primary type alias if we identified one
+      if (group.primaryType) {
+        lines.push('')
+        lines.push(`/** Primary ${pascalSingular} type for read operations */`)
+        lines.push(`export type ${pascalSingular} = _Primary${pascalSingular}`)
+      }
+
+      lines.push('')
+
+      barrels.set(pluralEntityName, lines.join('\n'))
+    }
+
+    return barrels
+  }
+
+  /**
+   * Extract entity name from schema name.
+   * E.g., "AccountOwner" → "account", "AccountCreate" → "account"
+   */
+  private extractEntityFromSchemaName(schemaName: string): string | null {
+    // Common suffixes to strip
+    const suffixes = ['Owner', 'Response', 'Create', 'Update', 'ListResponse', 'FullContext', 'WithTracking']
+
+    for (const suffix of suffixes) {
+      if (schemaName.endsWith(suffix)) {
+        const baseName = schemaName.slice(0, -suffix.length)
+        return baseName.toLowerCase()
+      }
+    }
+
+    // If no suffix matched, use the full name as-is
+    return schemaName.toLowerCase()
+  }
+
+  private toPascalCase(str: string): string {
+    return str
+      .split(/[-_\s]+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join('')
+  }
+
+  private pluralize(str: string): string {
+    if (str.endsWith('y')) {
+      return str.slice(0, -1) + 'ies'
+    }
+    if (str.endsWith('s') || str.endsWith('x') || str.endsWith('ch') || str.endsWith('sh')) {
+      return str + 'es'
+    }
+    return str + 's'
   }
 
   private generateIndexFile(schemas: ParsedSchema[]): string {

@@ -108,9 +108,19 @@ export async function generateCommand(
         }
       }
 
+      // Write entity barrel files (e.g., accounts.ts groups account-related schemas)
+      for (const [entityName, content] of schemas.entityBarrels) {
+        const fileName = `${toKebabCase(entityName)}.ts`
+        const filePath = join(schemasDir, fileName)
+        await writeFile(filePath, content)
+        if (options.verbose) {
+          console.log(`  Written entity barrel: ${filePath}`)
+        }
+      }
+
       // Write index file
       await writeFile(join(schemasDir, 'index.ts'), schemas.index)
-      console.log(`Written ${schemas.schemas.size} schemas to ${schemasDir}/`)
+      console.log(`Written ${schemas.schemas.size} schemas + ${schemas.entityBarrels.size} entity barrels to ${schemasDir}/`)
 
       if (options.verbose) {
         // Show a sample schema
