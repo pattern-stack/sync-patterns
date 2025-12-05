@@ -129,3 +129,11 @@ export {
   type GeneratedSyncProvider,
   type SyncProviderGeneratorOptions,
 } from './sync-provider-generator.js'
+
+// Entities Hook Generator (aggregator for useEntities)
+export {
+  EntitiesHookGenerator,
+  generateEntitiesHook,
+  type GeneratedEntitiesHook,
+  type EntitiesHookGeneratorOptions,
+} from './entities-hook-generator.js'

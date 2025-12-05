@@ -13,6 +13,7 @@ import { generateHooks } from '../../generators/hook-generator.js'
 import { generateCollections } from '../../generators/collection-generator.js'
 import { generateEntityWrappers } from '../../generators/entity-generator.js'
 import { generateConfig } from '../../generators/config-generator.js'
+import { generateEntitiesHook } from '../../generators/entities-hook-generator.js'
 
 export interface GenerateOptions {
   output: string
@@ -85,6 +86,7 @@ export async function generateCommand(
       }
       if (options.entities) {
         console.log(`  - Entity wrappers in ${options.output}/entities/`)
+        console.log(`  - Entities hook in ${options.output}/entities-hook.tsx`)
         console.log(`  - Runtime config in ${options.output}/config.ts`)
       }
       return
@@ -240,6 +242,12 @@ export async function generateCommand(
         await writeFile(join(entitiesDir, 'index.ts'), entities.index)
         await writeFile(join(entitiesDir, 'types.ts'), entities.types)
         console.log(`Written ${entities.wrappers.size} entity wrappers to ${entitiesDir}/`)
+
+        // Generate entities-hook.tsx (aggregator for useEntities)
+        console.log('\nGenerating entities hook...')
+        const entitiesHook = generateEntitiesHook(parsed)
+        await writeFile(join(options.output, 'entities-hook.tsx'), entitiesHook.code)
+        console.log(`Written entities-hook.tsx to ${options.output}/`)
       } else {
         console.log('  No entities with CRUD operations found')
       }
@@ -276,6 +284,9 @@ export async function generateCommand(
       rootIndexLines.push('// Entity wrappers - THE public API for data operations')
       rootIndexLines.push('// (Each entity module re-exports its related schema types)')
       rootIndexLines.push("export * from './entities/index'")
+      rootIndexLines.push('')
+      rootIndexLines.push('// Aggregated entities hook for entity-agnostic pages')
+      rootIndexLines.push("export { useEntities, hasEntity, getEntityNames, type Entities, type EntityApi } from './entities-hook'")
       rootIndexLines.push('')
       rootIndexLines.push('// Runtime configuration')
       rootIndexLines.push("export { configureSync, isLocalFirst, getElectricUrl, getSyncConfig } from './config'")
