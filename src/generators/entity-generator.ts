@@ -52,6 +52,18 @@ interface CrudOperation {
 type SyncMode = 'api' | 'realtime' | 'offline'
 
 /**
+ * Information about a list operation's response structure
+ */
+interface ListResponseInfo {
+  /** The response type name (e.g., "AccountListResponse") */
+  typeName: string
+  /** Whether the response is a paginated wrapper with an array property */
+  isPaginated: boolean
+  /** The property name containing the array (e.g., "items") */
+  arrayProperty?: string
+}
+
+/**
  * Information about an entity extracted from endpoints
  */
 interface EntityInfo {
@@ -68,6 +80,8 @@ interface EntityInfo {
   responseTypes: Set<string>
   /** Types we need for create/update (detected from request schemas) */
   requestTypes: Set<string>
+  /** Info about list response structure (for paginated extraction) */
+  listResponseInfo?: ListResponseInfo
 }
 
 export class EntityGenerator {
@@ -151,8 +165,8 @@ export class EntityGenerator {
         }
       }
 
-      // Extract response types
-      this.extractResponseTypes(endpoint, entityInfo)
+      // Extract response types (pass schemas for pagination detection)
+      this.extractResponseTypes(endpoint, entityInfo, schemas)
 
       // Extract request types
       this.extractRequestTypes(endpoint, entityInfo)
@@ -263,7 +277,7 @@ export class EntityGenerator {
   /**
    * Extract response types from endpoint
    */
-  private extractResponseTypes(endpoint: ParsedEndpoint, entityInfo: EntityInfo): void {
+  private extractResponseTypes(endpoint: ParsedEndpoint, entityInfo: EntityInfo, schemas: ParsedSchema[]): void {
     for (const response of endpoint.responses) {
       if (response.statusCode.startsWith('2') && response.content) {
         const jsonContent = response.content['application/json']
@@ -271,10 +285,65 @@ export class EntityGenerator {
           const typeName = this.extractTypeNameFromRef(jsonContent.schema.ref)
           if (typeName) {
             entityInfo.responseTypes.add(typeName)
+
+            // For list operations, detect if response is a paginated wrapper
+            const operation = this.detectCrudOperation(endpoint, entityInfo.name)
+            if (operation?.type === 'list') {
+              const listResponseInfo = this.detectPaginatedResponse(typeName, schemas)
+              if (listResponseInfo) {
+                entityInfo.listResponseInfo = listResponseInfo
+              }
+            }
           }
         }
       }
     }
+  }
+
+  /**
+   * Detect if a schema is a paginated response wrapper
+   * Returns info about the array property if found
+   */
+  private detectPaginatedResponse(typeName: string, schemas: ParsedSchema[]): ListResponseInfo | undefined {
+    // Find the schema by name
+    const schema = schemas.find(s => s.name === typeName)
+    if (!schema || schema.type !== 'object' || !schema.properties) {
+      return { typeName, isPaginated: false }
+    }
+
+    // Look for common pagination wrapper patterns
+    // Pattern Stack standard: { items: [...], total, offset, limit }
+    // Also check for entity-named arrays: { accounts: [...], ... }
+    const paginationIndicators = ['total', 'offset', 'limit', 'count', 'page', 'page_size']
+    const hasPaginationFields = paginationIndicators.some(field => field in schema.properties!)
+
+    if (!hasPaginationFields) {
+      return { typeName, isPaginated: false }
+    }
+
+    // Find the array property - prefer 'items' (Pattern Stack standard)
+    for (const [propName, propSchema] of Object.entries(schema.properties)) {
+      if (propSchema.type === 'array') {
+        return {
+          typeName,
+          isPaginated: true,
+          arrayProperty: propName,
+        }
+      }
+      // Handle $ref to array type
+      if (propSchema.ref) {
+        const refSchema = schemas.find(s => s.ref === propSchema.ref || s.name === this.extractTypeNameFromRef(propSchema.ref!))
+        if (refSchema?.type === 'array') {
+          return {
+            typeName,
+            isPaginated: true,
+            arrayProperty: propName,
+          }
+        }
+      }
+    }
+
+    return { typeName, isPaginated: false }
   }
 
   /**
@@ -469,11 +538,16 @@ export class EntityGenerator {
    */
   private getWrapperTypeImports(entity: EntityInfo): string[] {
     const types = new Set<string>()
-    const { pascalName, requestTypes } = entity
+    const { pascalName, requestTypes, listResponseInfo } = entity
 
     // Get entity type for return values
     const entityType = this.getEntityType(entity)
     types.add(entityType)
+
+    // Add list response type if it's paginated (needed for type cast)
+    if (listResponseInfo?.isPaginated && listResponseInfo.typeName) {
+      types.add(listResponseInfo.typeName)
+    }
 
     // Add Create type if it exists
     const createType = `${pascalName}Create`
@@ -513,7 +587,7 @@ export class EntityGenerator {
   }
 
   private generateListHook(entity: EntityInfo, operation: CrudOperation): string {
-    const { namePlural, pascalName, syncMode } = entity
+    const { namePlural, pascalName, syncMode, listResponseInfo } = entity
     const entityType = this.getEntityType(entity)
     const hasCollection = syncMode !== 'api'
     const lines: string[] = []
@@ -551,10 +625,21 @@ export class EntityGenerator {
     }
 
     // API mode (default)
+    // Handle paginated responses - extract array from wrapper if needed
+    const isPaginated = listResponseInfo?.isPaginated && listResponseInfo.arrayProperty
+    // Cast to the response type to enable property access (hooks return unknown)
+    const responseType = isPaginated ? listResponseInfo!.typeName : `${entityType}[]`
+    const dataExtraction = isPaginated
+      ? `(result.data as ${responseType} | undefined)?.${listResponseInfo!.arrayProperty}`
+      : 'result.data'
+
     lines.push('  // api mode - use TanStack Query')
+    if (isPaginated) {
+      lines.push(`  // Note: ${operation.hookName} returns ${listResponseInfo!.typeName} with { ${listResponseInfo!.arrayProperty}, total, offset, limit }`)
+    }
     lines.push(`  const result = hooks.${operation.hookName}()`)
     lines.push('  return {')
-    lines.push(`    data: result.data as ${entityType}[] | undefined,`)
+    lines.push(`    data: ${dataExtraction} as ${entityType}[] | undefined,`)
     lines.push('    isLoading: result.isLoading,')
     lines.push('    error: (result.error as Error) ?? null,')
     lines.push('  }')
