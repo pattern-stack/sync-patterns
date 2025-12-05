@@ -371,11 +371,19 @@ export class EntityGenerator {
 
   /**
    * Generate unified wrapper for an entity
+   *
+   * Key design: Only generate sync modes that the entity actually supports
+   * based on the syncMode from OpenAPI spec. This avoids importing non-existent
+   * collections for entities that only use 'api' mode.
    */
   private generateWrapper(entity: EntityInfo): string {
     const lines: string[] = []
-    const { namePlural, pascalName, syncMode, operations, relatedSchemas, allHookNames } = entity
-    const hasCollection = syncMode !== 'api'
+    const { namePlural, pascalName, operations, relatedSchemas, allHookNames, syncMode } = entity
+    // Only generate sync modes if the entity is configured for them
+    // If syncMode is 'api', don't generate realtime/offline code
+    // If syncMode is 'realtime' or 'offline', generate all three modes for flexibility
+    const supportsRealtime = syncMode !== 'api'
+    const supportsOffline = syncMode !== 'api'
 
     // Determine which operations we have
     const hasOp = {
@@ -460,24 +468,33 @@ export class EntityGenerator {
     // =========================================================================
     // SECTION 3: Internal imports for unified wrappers
     // =========================================================================
-    // These are internal - we use hooks.* for the wrapper implementations
-
-    if (hasCollection) {
+    // Only import getSyncMode if we need mode switching
+    if (supportsRealtime || supportsOffline) {
       lines.push("import { getSyncMode } from '../config'")
-      // SyncMode type not needed - getSyncMode returns it
-      // TanStack DB React integration for live queries
-      lines.push("import { useLiveQuery } from '@tanstack/react-db'")
-      // Query operators for filtering
-      lines.push("import { eq } from '@tanstack/db'")
+    }
 
-      // Import the correct collection based on sync mode
+    // Always import TanStack DB for realtime mode
+    if (supportsRealtime) {
+      lines.push("import { useLiveQuery } from '@tanstack/react-db'")
+      lines.push("import { eq } from '@tanstack/db'")
       const collectionBaseName = this.toCamelCase(namePlural)
       const kebabName = this.toKebabCase(namePlural)
-      if (syncMode === 'realtime') {
-        lines.push(`import { ${collectionBaseName}RealtimeCollection } from '../collections/${kebabName}.realtime'`)
-      } else if (syncMode === 'offline') {
-        lines.push(`import { ${collectionBaseName}OfflineCollection } from '../collections/${kebabName}.offline'`)
-      }
+      lines.push(`import { ${collectionBaseName}RealtimeCollection } from '../collections/${kebabName}.realtime'`)
+    }
+
+    // Import RxDB offline helpers for entities that support it
+    if (supportsOffline) {
+      const kebabName = this.toKebabCase(namePlural)
+      const singularPascal = pascalName
+      lines.push("import { useState, useEffect } from 'react'")
+      lines.push(`import {`)
+      lines.push(`  get${pascalName}sOfflineCollection,`)
+      lines.push(`  createOffline${singularPascal},`)
+      lines.push(`  updateOffline${singularPascal},`)
+      lines.push(`  deleteOffline${singularPascal},`)
+      lines.push(`} from '../collections/${kebabName}.offline'`)
+      lines.push("import type { RxCollection } from 'rxdb'")
+      lines.push(`import type { ${singularPascal}Document } from '../schemas/${kebabName}.rxdb-schema'`)
     }
 
     // Import hooks as namespace for internal use
@@ -493,42 +510,525 @@ export class EntityGenerator {
     lines.push('')
 
     // =========================================================================
+    // SECTION 3.5: RxDB React hook helper for offline mode
+    // =========================================================================
+    if (supportsOffline) {
+      lines.push('// ============================================================================')
+      lines.push('// RXDB REACT HOOK - Reactive queries for offline mode')
+      lines.push('// ============================================================================')
+      lines.push('')
+      lines.push(this.generateRxQueryHook(entity))
+      lines.push('')
+    }
+
+    // =========================================================================
     // SECTION 4: Unified wrapper functions
     // =========================================================================
     lines.push('// ============================================================================')
-    lines.push('// UNIFIED WRAPPERS - Abstract TanStack DB vs Query')
+    lines.push('// UNIFIED WRAPPERS - Abstract TanStack DB vs Query vs RxDB')
     lines.push('// ============================================================================')
     lines.push('')
 
     if (hasOp.list) {
       const listOp = operations.find(op => op.type === 'list')!
-      lines.push(this.generateListHook(entity, listOp))
+      lines.push(this.generateListHookAllModes(entity, listOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
 
     if (hasOp.get) {
       const getOp = operations.find(op => op.type === 'get')!
-      lines.push(this.generateGetHook(entity, getOp))
+      lines.push(this.generateGetHookAllModes(entity, getOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
 
     if (hasOp.create) {
       const createOp = operations.find(op => op.type === 'create')!
-      lines.push(this.generateCreateHook(entity, createOp))
+      lines.push(this.generateCreateHookAllModes(entity, createOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
 
     if (hasOp.update) {
       const updateOp = operations.find(op => op.type === 'update')!
-      lines.push(this.generateUpdateHook(entity, updateOp))
+      lines.push(this.generateUpdateHookAllModes(entity, updateOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
 
     if (hasOp.delete) {
       const deleteOp = operations.find(op => op.type === 'delete')!
-      lines.push(this.generateDeleteHook(entity, deleteOp))
+      lines.push(this.generateDeleteHookAllModes(entity, deleteOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate the useRxQuery helper hook for RxDB reactive queries
+   */
+  private generateRxQueryHook(entity: EntityInfo): string {
+    const { pascalName } = entity
+    const docType = `${pascalName}Document`
+    const getCollectionFn = `get${pascalName}sOfflineCollection`
+
+    return `/**
+ * React hook for RxDB reactive queries
+ * Subscribes to collection changes and returns live data
+ */
+function useRxQuery<T>(
+  queryFn: (collection: RxCollection<${docType}>) => Promise<T>,
+  deps: unknown[] = []
+): { data: T | undefined; isLoading: boolean; error: Error | null } {
+  const [data, setData] = useState<T | undefined>(undefined)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let subscription: { unsubscribe: () => void } | null = null
+
+    async function subscribe() {
+      try {
+        const collection = await ${getCollectionFn}()
+
+        // Subscribe to all changes in the collection
+        subscription = collection.$.subscribe(async () => {
+          if (cancelled) return
+          try {
+            const result = await queryFn(collection)
+            if (!cancelled) {
+              setData(result)
+              setIsLoading(false)
+            }
+          } catch (err) {
+            if (!cancelled) {
+              setError(err as Error)
+              setIsLoading(false)
+            }
+          }
+        })
+
+        // Initial fetch
+        const result = await queryFn(collection)
+        if (!cancelled) {
+          setData(result)
+          setIsLoading(false)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err as Error)
+          setIsLoading(false)
+        }
+      }
+    }
+
+    subscribe()
+
+    return () => {
+      cancelled = true
+      subscription?.unsubscribe()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+
+  return { data, isLoading, error }
+}`
+  }
+
+  /**
+   * Generate list hook supporting configured modes
+   */
+  private generateListHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
+    const { namePlural, pascalName, listResponseInfo } = entity
+    const entityType = this.getEntityType(entity)
+    const collName = this.toCamelCase(namePlural)
+    const collectionName = `${collName}RealtimeCollection`
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Fetch all ${namePlural}.`)
+      lines.push(supportsRealtime || supportsOffline
+        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        : ' * Unified wrapper - uses TanStack Query.')
+      lines.push(' */')
+    }
+
+    lines.push(`export function use${pascalName}s(): UnifiedQueryResult<${entityType}[]> {`)
+
+    if (supportsRealtime || supportsOffline) {
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+    }
+
+    // RxDB offline mode - must be called unconditionally due to React hooks rules
+    if (supportsOffline) {
+      lines.push('  // RxDB offline mode - persistent IndexedDB storage')
+      lines.push(`  const offlineResult = useRxQuery<${entityType}[]>(`)
+      lines.push('    async (collection) => {')
+      lines.push('      const docs = await collection.find().exec()')
+      lines.push(`      return docs.map((doc) => doc.toJSON() as unknown as ${entityType})`)
+      lines.push('    },')
+      lines.push('    []')
+      lines.push('  )')
+      lines.push('')
+      lines.push("  if (mode === 'offline') {")
+      lines.push('    return offlineResult')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // Realtime mode
+    if (supportsRealtime) {
+      lines.push("  if (mode === 'realtime') {")
+      lines.push('    // Use TanStack DB live query for reactive data')
+      lines.push(`    const { data } = useLiveQuery((q) =>`)
+      lines.push(`      q.from({ item: ${collectionName} })`)
+      lines.push(`        .select(({ item }) => item)`)
+      lines.push('    )')
+      lines.push('    return {')
+      lines.push(`      data: data as ${entityType}[] | undefined,`)
+      lines.push('      isLoading: data === undefined,')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // API mode (default)
+    const isPaginated = listResponseInfo?.isPaginated && listResponseInfo.arrayProperty
+    const responseType = isPaginated ? listResponseInfo!.typeName : `${entityType}[]`
+    const dataExtraction = isPaginated
+      ? `(result.data as ${responseType} | undefined)?.${listResponseInfo!.arrayProperty}`
+      : 'result.data'
+
+    lines.push('  // api mode - use TanStack Query')
+    if (isPaginated) {
+      lines.push(`  // Note: ${operation.hookName} returns ${listResponseInfo!.typeName} with { ${listResponseInfo!.arrayProperty}, total, offset, limit }`)
+    }
+    lines.push(`  const result = hooks.${operation.hookName}()`)
+    lines.push('  return {')
+    lines.push(`    data: ${dataExtraction} as ${entityType}[] | undefined,`)
+    lines.push('    isLoading: result.isLoading,')
+    lines.push('    error: (result.error as Error) ?? null,')
+    lines.push('  }')
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate get hook supporting configured modes
+   */
+  private generateGetHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
+    const { namePlural, pascalName, name } = entity
+    const entityType = this.getEntityType(entity)
+    const collName = this.toCamelCase(namePlural)
+    const collectionName = `${collName}RealtimeCollection`
+    const paramName = operation.pathParamName || 'id'
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Fetch a single ${name} by ID.`)
+      lines.push(supportsRealtime || supportsOffline
+        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        : ' * Unified wrapper - uses TanStack Query.')
+      lines.push(' */')
+    }
+
+    lines.push(`export function use${pascalName}(id: string): UnifiedQueryResult<${entityType} | undefined> {`)
+
+    if (supportsRealtime || supportsOffline) {
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+    }
+
+    // RxDB offline mode
+    if (supportsOffline) {
+      lines.push('  // RxDB offline mode')
+      lines.push(`  const offlineResult = useRxQuery<${entityType} | undefined>(`)
+      lines.push('    async (collection) => {')
+      lines.push('      const doc = await collection.findOne(id).exec()')
+      lines.push(`      return doc ? (doc.toJSON() as unknown as ${entityType}) : undefined`)
+      lines.push('    },')
+      lines.push('    [id]')
+      lines.push('  )')
+      lines.push('')
+      lines.push("  if (mode === 'offline') {")
+      lines.push('    return offlineResult')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // Realtime mode
+    if (supportsRealtime) {
+      lines.push("  if (mode === 'realtime') {")
+      lines.push('    // Use TanStack DB live query with filter')
+      lines.push(`    const { data } = useLiveQuery((q) =>`)
+      lines.push(`      q.from({ item: ${collectionName} })`)
+      lines.push(`        .where(({ item }) => eq(item.id, id))`)
+      lines.push(`        .select(({ item }) => item)`)
+      lines.push('    )')
+      lines.push('    return {')
+      lines.push(`      data: data?.[0] as ${entityType} | undefined,`)
+      lines.push('      isLoading: data === undefined,')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // API mode (default)
+    lines.push('  // api mode - use TanStack Query')
+    lines.push(`  const result = hooks.${operation.hookName}({ ${paramName}: id })`)
+    lines.push('  return {')
+    lines.push(`    data: result.data as ${entityType} | undefined,`)
+    lines.push('    isLoading: result.isLoading,')
+    lines.push('    error: (result.error as Error) ?? null,')
+    lines.push('  }')
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate create hook supporting configured modes
+   */
+  private generateCreateHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
+    const { namePlural, pascalName, requestTypes } = entity
+    const entityType = this.getEntityType(entity)
+    const collName = this.toCamelCase(namePlural)
+    const collectionName = `${collName}RealtimeCollection`
+    const createType = requestTypes.has(`${pascalName}Create`) ? `${pascalName}Create` : 'Record<string, unknown>'
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Create a new ${entity.name}.`)
+      lines.push(supportsRealtime || supportsOffline
+        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        : ' * Unified wrapper - uses TanStack Query.')
+      lines.push(' */')
+    }
+
+    lines.push(`export function useCreate${pascalName}(): UnifiedMutationResult<${entityType}, ${createType}> {`)
+
+    if (supportsRealtime || supportsOffline) {
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+    }
+
+    // Offline mode
+    if (supportsOffline) {
+      const docType = `${pascalName}Document`
+      lines.push("  if (mode === 'offline') {")
+      lines.push('    return {')
+      lines.push(`      mutate: (data: ${createType}) => {`)
+      lines.push(`        createOffline${pascalName}(data as unknown as Omit<${docType}, 'id' | 'created_at' | 'updated_at'>)`)
+      lines.push('      },')
+      lines.push(`      mutateAsync: async (data: ${createType}) => {`)
+      lines.push(`        const doc = await createOffline${pascalName}(data as unknown as Omit<${docType}, 'id' | 'created_at' | 'updated_at'>)`)
+      lines.push(`        return doc as unknown as ${entityType}`)
+      lines.push('      },')
+      lines.push('      isPending: false,')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // Realtime mode
+    if (supportsRealtime) {
+      lines.push("  if (mode === 'realtime') {")
+      lines.push('    return {')
+      lines.push(`      mutate: (data: ${createType}) => {`)
+      lines.push(`        ${collectionName}.insert({`)
+      lines.push('          ...data,')
+      lines.push('          id: crypto.randomUUID(),')
+      lines.push('          created_at: new Date().toISOString(),')
+      lines.push('          updated_at: new Date().toISOString(),')
+      lines.push(`        } as unknown as ${entityType})`)
+      lines.push('      },')
+      lines.push(`      mutateAsync: async (data: ${createType}) => {`)
+      lines.push('        const doc = {')
+      lines.push('          ...data,')
+      lines.push('          id: crypto.randomUUID(),')
+      lines.push('          created_at: new Date().toISOString(),')
+      lines.push('          updated_at: new Date().toISOString(),')
+      lines.push('        }')
+      lines.push(`        await ${collectionName}.insert(doc as unknown as ${entityType})`)
+      lines.push(`        return doc as unknown as ${entityType}`)
+      lines.push('      },')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // API mode (default)
+    lines.push('  // api mode')
+    lines.push(`  const mutation = hooks.${operation.hookName}()`)
+    lines.push('  return {')
+    lines.push(`    mutate: (data: ${createType}) => mutation.mutate(data as Record<string, unknown>),`)
+    lines.push(`    mutateAsync: async (data: ${createType}) => mutation.mutateAsync(data as Record<string, unknown>) as Promise<${entityType}>,`)
+    lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
+    lines.push('  }')
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate update hook supporting configured modes
+   */
+  private generateUpdateHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
+    const { namePlural, pascalName, requestTypes } = entity
+    const entityType = this.getEntityType(entity)
+    const collName = this.toCamelCase(namePlural)
+    const collectionName = `${collName}RealtimeCollection`
+    const updateType = requestTypes.has(`${pascalName}Update`) ? `${pascalName}Update` : 'Record<string, unknown>'
+    const paramName = operation.pathParamName || 'id'
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Update an existing ${entity.name}.`)
+      lines.push(supportsRealtime || supportsOffline
+        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        : ' * Unified wrapper - uses TanStack Query.')
+      lines.push(' */')
+    }
+
+    lines.push(`export function useUpdate${pascalName}(): UnifiedMutationResult<${entityType}, { id: string; data: ${updateType} }> {`)
+
+    if (supportsRealtime || supportsOffline) {
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+    }
+
+    // Offline mode
+    if (supportsOffline) {
+      const docType = `${pascalName}Document`
+      lines.push("  if (mode === 'offline') {")
+      lines.push('    return {')
+      lines.push(`      mutate: ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        updateOffline${pascalName}(id, data as unknown as Partial<${docType}>)`)
+      lines.push('      },')
+      lines.push(`      mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        const doc = await updateOffline${pascalName}(id, data as unknown as Partial<${docType}>)`)
+      lines.push(`        return doc as unknown as ${entityType}`)
+      lines.push('      },')
+      lines.push('      isPending: false,')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // Realtime mode
+    if (supportsRealtime) {
+      lines.push("  if (mode === 'realtime') {")
+      lines.push('    return {')
+      lines.push(`      mutate: ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        ${collectionName}.update(id, (draft) => Object.assign(draft, { ...data, updated_at: new Date().toISOString() }))`)
+      lines.push('      },')
+      lines.push(`      mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => {`)
+      lines.push(`        await ${collectionName}.update(id, (draft) => Object.assign(draft, { ...data, updated_at: new Date().toISOString() }))`)
+      lines.push(`        return { id, ...data } as unknown as ${entityType}`)
+      lines.push('      },')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // API mode (default)
+    lines.push('  // api mode')
+    lines.push(`  const mutation = hooks.${operation.hookName}()`)
+    lines.push('  return {')
+    lines.push(`    mutate: ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutate({ pathParams: { ${paramName}: id }, ...data }),`)
+    lines.push(`    mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => mutation.mutateAsync({ pathParams: { ${paramName}: id }, ...data }) as Promise<${entityType}>,`)
+    lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
+    lines.push('  }')
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate delete hook supporting configured modes
+   */
+  private generateDeleteHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
+    const { namePlural, pascalName } = entity
+    const collName = this.toCamelCase(namePlural)
+    const collectionName = `${collName}RealtimeCollection`
+    const paramName = operation.pathParamName || 'id'
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Delete ${this.getArticle(entity.name)} ${entity.name}.`)
+      lines.push(supportsRealtime || supportsOffline
+        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        : ' * Unified wrapper - uses TanStack Query.')
+      lines.push(' */')
+    }
+
+    lines.push(`export function useDelete${pascalName}(): UnifiedMutationResult<void, string> {`)
+
+    if (supportsRealtime || supportsOffline) {
+      lines.push(`  const mode = getSyncMode('${namePlural}')`)
+      lines.push('')
+    }
+
+    // Offline mode
+    if (supportsOffline) {
+      lines.push("  if (mode === 'offline') {")
+      lines.push('    return {')
+      lines.push('      mutate: (id: string) => {')
+      lines.push(`        deleteOffline${pascalName}(id)`)
+      lines.push('      },')
+      lines.push('      mutateAsync: async (id: string) => {')
+      lines.push(`        await deleteOffline${pascalName}(id)`)
+      lines.push('      },')
+      lines.push('      isPending: false,')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // Realtime mode
+    if (supportsRealtime) {
+      lines.push("  if (mode === 'realtime') {")
+      lines.push('    return {')
+      lines.push('      mutate: (id: string) => {')
+      lines.push(`        ${collectionName}.delete(id)`)
+      lines.push('      },')
+      lines.push('      mutateAsync: async (id: string) => {')
+      lines.push(`        await ${collectionName}.delete(id)`)
+      lines.push('      },')
+      lines.push('      isPending: false, // Optimistic - always instant')
+      lines.push('      error: null,')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push('')
+    }
+
+    // API mode (default)
+    lines.push('  // api mode')
+    lines.push(`  const mutation = hooks.${operation.hookName}()`)
+    lines.push('  return {')
+    lines.push(`    mutate: (id: string) => mutation.mutate({ pathParams: { ${paramName}: id } }),`)
+    lines.push(`    mutateAsync: async (id: string) => { await mutation.mutateAsync({ pathParams: { ${paramName}: id } }) },`)
+    lines.push('    isPending: mutation.isPending,')
+    lines.push('    error: (mutation.error as Error) ?? null,')
+    lines.push('  }')
+    lines.push('}')
 
     return lines.join('\n')
   }
