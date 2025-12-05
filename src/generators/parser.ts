@@ -168,8 +168,10 @@ export class OpenAPIParser {
     for (const [path, pathItem] of Object.entries(this.spec.paths || {})) {
       if (!pathItem) continue
 
-      // Check for x-sync extension at path level
+      // Check for x-sync-mode extension at path level (new flat format)
       const pathExtensions = pathItem as Record<string, unknown>
+      const pathSyncMode = pathExtensions['x-sync-mode'] as string | undefined
+      // Legacy: x-sync object format
       const pathSyncConfig = pathExtensions['x-sync'] as Record<string, unknown> | undefined
 
       const methods: HTTPMethod[] = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options']
@@ -178,13 +180,20 @@ export class OpenAPIParser {
         const operation = pathItem[method]
         if (!operation) continue
 
-        // Check for x-sync extension at operation level
+        // Check for x-sync-mode extension at operation level (new flat format)
         const opExtensions = operation as Record<string, unknown>
+        const opSyncMode = opExtensions['x-sync-mode'] as string | undefined
+        // Legacy: x-sync object format
         const opSyncConfig = opExtensions['x-sync'] as Record<string, unknown> | undefined
+
+        // Merge sync config from operation or path level (for legacy properties)
         const syncConfig = opSyncConfig || pathSyncConfig
 
-        // Extract sync mode with backward compatibility
-        const extractedSyncMode = this.extractSyncMode(syncConfig)
+        // Extract sync mode: prioritize flat x-sync-mode, then x-sync object
+        const extractedSyncMode = this.extractSyncMode(
+          opSyncMode || pathSyncMode,
+          syncConfig
+        )
 
         endpoints.push({
           path,
@@ -373,24 +382,38 @@ export class OpenAPIParser {
   }
 
   /**
-   * Extract sync mode from x-sync extension with backward compatibility
+   * Extract sync mode from OpenAPI extensions with backward compatibility
    *
-   * New format: x-sync.mode: 'api' | 'realtime' | 'offline'
-   * Legacy format: x-sync.local_first: true → 'realtime' (preserves existing behavior)
-   *                x-sync.local_first: false → 'api'
+   * Formats (in priority order):
+   * 1. x-sync-mode: 'api' | 'local_first' | 'offline' (new flat format)
+   * 2. x-sync.mode: 'api' | 'local_first' | 'offline' (intermediate format)
+   * 3. x-sync.local_first: true → 'local_first' (legacy boolean format)
+   *    x-sync.local_first: false → 'api'
    *
-   * Default: 'api' (server-only)
+   * Note: 'local_first' mode maps to 'realtime' internally for TanStack DB/Electric
+   *
+   * Default: undefined (will use 'api' at generation time)
    */
-  private extractSyncMode(syncConfig: Record<string, unknown> | undefined): SyncMode | undefined {
-    if (!syncConfig) return undefined
-
-    // New format: explicit mode
-    const mode = syncConfig.mode as string | undefined
-    if (mode === 'api' || mode === 'realtime' || mode === 'offline') {
-      return mode
+  private extractSyncMode(
+    flatSyncMode: string | undefined,
+    syncConfig: Record<string, unknown> | undefined
+  ): SyncMode | undefined {
+    // Priority 1: New flat x-sync-mode format
+    if (flatSyncMode === 'api' || flatSyncMode === 'local_first' || flatSyncMode === 'offline') {
+      // Map 'local_first' to 'realtime' for internal consistency
+      return flatSyncMode === 'local_first' ? 'realtime' : flatSyncMode
     }
 
-    // Legacy format: local_first boolean
+    if (!syncConfig) return undefined
+
+    // Priority 2: x-sync.mode object format
+    const mode = syncConfig.mode as string | undefined
+    if (mode === 'api' || mode === 'local_first' || mode === 'offline' || mode === 'realtime') {
+      // Map 'local_first' to 'realtime' for internal consistency
+      return mode === 'local_first' ? 'realtime' : (mode as SyncMode)
+    }
+
+    // Priority 3: Legacy x-sync.local_first boolean format
     // IMPORTANT: local_first: true maps to 'realtime' NOT 'offline'
     // This preserves backward compatibility with existing ElectricSQL usage
     const localFirst = syncConfig.local_first as boolean | undefined
