@@ -395,7 +395,7 @@ export class EntityGenerator {
 
     if (hasCollection) {
       lines.push("import { getSyncMode } from '../config'")
-      lines.push("import type { SyncMode } from '../config'")
+      // SyncMode type not needed - getSyncMode returns it
       // TanStack DB React integration for live queries
       lines.push("import { useLiveQuery } from '@tanstack/react-db'")
       // Query operators for filtering
@@ -648,7 +648,7 @@ export class EntityGenerator {
       lines.push('          id: crypto.randomUUID(),')
       lines.push('          created_at: new Date().toISOString(),')
       lines.push('          updated_at: new Date().toISOString(),')
-      lines.push('        } as Record<string, unknown>)')
+      lines.push(`        } as unknown as ${entityType})`)
       lines.push('      },')
       lines.push(`      mutateAsync: async (data: ${createType}) => {`)
       lines.push('        const doc = {')
@@ -657,7 +657,7 @@ export class EntityGenerator {
       lines.push('          created_at: new Date().toISOString(),')
       lines.push('          updated_at: new Date().toISOString(),')
       lines.push('        }')
-      lines.push(`        await ${collectionName}.insert(doc as Record<string, unknown>)`)
+      lines.push(`        await ${collectionName}.insert(doc as unknown as ${entityType})`)
       lines.push(`        return doc as unknown as ${entityType}`)
       lines.push('      },')
       lines.push('      isPending: false, // Optimistic - always instant')
@@ -809,6 +809,7 @@ export class EntityGenerator {
     lines.push('  mutate: (variables: TVariables) => void')
     lines.push('  mutateAsync: (variables: TVariables) => Promise<TData>')
     lines.push('  isPending: boolean')
+    lines.push('  error: Error | null')
     lines.push('}')
     lines.push('')
 
