@@ -123,6 +123,8 @@ Instead of 3 modes, there's **one paradigm**:
 
 ### 3.1 Pattern Class Configuration
 
+> **Note:** Unlike `ExtensibleFieldsMixin` which adds columns, sync functionality requires no mixin. Simply setting `sync_mode = "events"` in the Pattern class is sufficient - the metaclass automatically adds the necessary methods.
+
 Extend Pattern class to declare sync behavior:
 
 ```python
@@ -404,6 +406,180 @@ async def handle_item_added(db: AsyncSession, event: ClientEvent) -> None:
     if order:
         order.items = [*order.items, event.payload["item"]]
         order.updated_at = event.timestamp
+```
+
+### 3.5 Auto-Generated Model Methods
+
+When `sync_mode="events"` is set in the Pattern class, the metaclass automatically adds these methods to the model:
+
+- `emit_event(event_type: str, payload: dict)` - Queue an event for this entity
+- `get_event_history(limit: int = 100)` - Fetch events for this entity from SystemEvent
+
+**Implementation in `__init_subclass__`:**
+
+```python
+def __init_subclass__(cls, **kwargs):
+    super().__init_subclass__(**kwargs)
+
+    # Auto-add sync methods if sync_mode == "events"
+    if hasattr(cls, "Pattern"):
+        sync_mode = getattr(cls.Pattern, "sync_mode", "api")
+        if sync_mode == "events":
+            cls.emit_event = _create_emit_event_method()
+            cls.get_event_history = _create_get_event_history_method()
+```
+
+**Example usage:**
+
+```python
+order = Order(table_number=5)
+await order.emit_event("item_added", {"item": "burger"})
+history = await order.get_event_history()
+```
+
+### 3.6 Extension Architecture
+
+To avoid BasePattern becoming a god-class, sync functionality is implemented as an internal extension:
+
+```
+atoms/patterns/
+├── base.py              # Thin orchestrator
+├── extensions/          # Internal extensions
+│   ├── __init__.py
+│   ├── fields.py        # Field processing logic
+│   ├── changes.py       # Change tracking logic
+│   ├── events.py        # Event emission logic
+│   └── sync.py          # NEW: Sync methods
+```
+
+**Extension pattern:**
+
+```python
+# extensions/sync.py
+class SyncExtension:
+    @staticmethod
+    def should_apply(cls) -> bool:
+        if not hasattr(cls, "Pattern"):
+            return False
+        return getattr(cls.Pattern, "sync_mode", "api") == "events"
+
+    @staticmethod
+    def setup(cls) -> None:
+        cls.emit_event = SyncExtension._emit_event
+        cls.get_event_history = SyncExtension._get_event_history
+```
+
+**BasePattern orchestrates extensions:**
+
+```python
+EXTENSIONS = [FieldExtension, ChangeTrackingExtension, EventExtension, SyncExtension]
+
+class BasePattern(UUIDMixin, Base):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for extension in EXTENSIONS:
+            if extension.should_apply(cls):
+                extension.setup(cls)
+```
+
+### 3.7 Discovery and Auto-Registration
+
+Complete discovery → factory → registration pattern (mirroring ExtensibleFieldsMixin):
+
+**Discovery function:**
+
+```python
+# sync/discovery.py
+def discover_syncable_models(base_class: type) -> list[type]:
+    """Discover all models where Pattern.sync_mode == 'events'"""
+    syncable = []
+    for mapper in base_class.registry.mappers:
+        model = mapper.class_
+        if not hasattr(model, "Pattern"):
+            continue
+        if getattr(model.Pattern, "sync_mode", "api") != "events":
+            continue
+        syncable.append(model)
+    return syncable
+
+def get_sync_config(model_class: type) -> dict:
+    """Extract sync configuration from model's Pattern class."""
+    return {
+        "entity": getattr(model_class.Pattern, "entity", model_class.__tablename__),
+        "sync_events": getattr(model_class.Pattern, "sync_events", []),
+        "sync_notification": getattr(model_class.Pattern, "sync_notification", "redis"),
+    }
+```
+
+**Router factory:**
+
+```python
+# api/routers/events.py
+def create_events_router(
+    syncable_models: list[type],
+    prefix: str = "/api/v1/events",
+    db_dependency = None,
+    auth_dependency = None,
+) -> APIRouter:
+    """Create events router for all syncable models.
+
+    Similar to create_field_router(), generates:
+    - POST /batch - Receive events from clients
+    - GET /since - Get events since timestamp
+    - WS /stream - WebSocket for real-time events
+    """
+```
+
+**App factory integration:**
+
+```python
+# app/factory.py
+def create_app(settings) -> FastAPI:
+    app = FastAPI(...)
+
+    # Auto-register sync infrastructure
+    if getattr(settings, "ENABLE_SYNC", False):
+        from pattern_stack.atoms.sync.discovery import discover_syncable_models
+        from pattern_stack.atoms.api.routers.events import create_events_router
+
+        models = discover_syncable_models(Base)
+        if models:
+            router = create_events_router(
+                syncable_models=models,
+                auth_dependency=get_current_user if settings.AUTH_ENABLED else None,
+            )
+            app.include_router(router)
+
+    return app
+```
+
+### 3.8 WebSocket Endpoint
+
+WebSocket endpoint that bridges Redis pub/sub to clients:
+
+```python
+@router.websocket("/stream")
+async def websocket_stream(
+    websocket: WebSocket,
+    channels: str = Query(None),  # Optional: filter channels
+):
+    """WebSocket endpoint for real-time event streaming.
+
+    Subscribes to Redis pub/sub and forwards events to connected client.
+    """
+    await websocket.accept()
+
+    # Subscribe to entity channels
+    channel_list = channels.split(",") if channels else list(allowed_entities.keys())
+    notifications = get_notification_service()
+
+    try:
+        async for channel, event in notifications.subscribe(*channel_list):
+            await websocket.send_json({"channel": channel, "event": event})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await notifications.close()
 ```
 
 ## 4. Frontend Changes
@@ -897,10 +1073,12 @@ paths:
 
 ### Phase 1: Infrastructure (No Breaking Changes)
 
-1. Add notification subsystem to backend-patterns
-2. Add event batch endpoint generation
-3. Add Dexie event store to frontend-patterns
-4. Keep existing 3-mode generator working
+1. Extract existing BasePattern functionality into extensions (fields, changes, events)
+2. Add sync extension
+3. Add notification subsystem to backend-patterns
+4. Add event batch endpoint generation
+5. Add Dexie event store to frontend-patterns
+6. Keep existing 3-mode generator working
 
 ### Phase 2: Parallel Implementation
 
