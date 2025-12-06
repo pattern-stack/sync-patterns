@@ -38,332 +38,29 @@ A single, unified sync paradigm that:
 | No audit trail | Complete event history |
 | Complex generator | Simpler generator |
 
-## Phase 1: BasePattern Extension Refactor
+## Prerequisites
 
-**Goal**: Extract existing BasePattern functionality into internal extensions without breaking changes.
+This implementation assumes the BasePattern extension architecture is available. The extension system allows BasePattern to delegate specific functionality (field processing, change tracking, sync events) to modular extensions that can be enabled/configured per pattern.
 
-### Dependencies
-- None (foundational refactor)
+**What we need from the extension system**:
+- `PatternExtension` base class with `setup_class()` lifecycle hook
+- Extension registration via `BasePattern.__init_subclass__`
+- Ability to add class methods and event listeners from extensions
 
-### Tasks
+The `SyncExtension` will plug into this architecture to provide event emission and notification capabilities without modifying BasePattern core logic.
 
-#### 1.1 Create Extension Base Architecture
+See `/Users/dug/pattern-stack-workspace/backend-patterns/docs/plans/BASEPATTERN-EXTENSION-REFACTOR-OUTLINE.md` for the planned extension architecture.
 
-Create the extension infrastructure:
-
-```python
-# backend-patterns/pattern_stack/atoms/patterns/extensions/base.py
-
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
-
-if TYPE_CHECKING:
-    from pattern_stack.atoms.patterns.base import BasePattern
-
-class PatternExtension(ABC):
-    """Base class for pattern extensions.
-
-    Extensions encapsulate specific aspects of pattern functionality
-    (fields, changes, events, sync) and are orchestrated by BasePattern.
-    """
-
-    # Class-level state (shared across all instances of the pattern)
-    _extension_registry: ClassVar[dict[str, type["PatternExtension"]]] = {}
-
-    def __init__(self, pattern_class: type["BasePattern"]) -> None:
-        """Initialize extension for a specific pattern class.
-
-        Args:
-            pattern_class: The pattern class this extension is attached to
-        """
-        self.pattern_class = pattern_class
-
-    @abstractmethod
-    def setup_class(self) -> None:
-        """Called during pattern class creation (__init_subclass__).
-
-        Use this to:
-        - Add event listeners
-        - Process configuration
-        - Set up class-level attributes
-        """
-        pass
-
-    def setup_instance(self, instance: "BasePattern") -> None:
-        """Called during pattern instance creation (__init__).
-
-        Override if you need instance-level setup.
-
-        Args:
-            instance: The pattern instance being created
-        """
-        pass
-
-    @classmethod
-    def register(cls, name: str) -> None:
-        """Register this extension type."""
-        cls._extension_registry[name] = cls
-```
-
-#### 1.2 Extract Field Processing Extension
-
-Move field processing logic from BasePattern to dedicated extension:
-
-```python
-# backend-patterns/pattern_stack/atoms/patterns/extensions/fields.py
-
-from typing import TYPE_CHECKING, Any
-from pattern_stack.atoms.patterns.extensions.base import PatternExtension
-from pattern_stack.atoms.patterns.fields import Field
-
-if TYPE_CHECKING:
-    from pattern_stack.atoms.patterns.base import BasePattern
-
-class FieldsExtension(PatternExtension):
-    """Extension that processes Field instances into SQLAlchemy columns."""
-
-    def setup_class(self) -> None:
-        """Transform Field instances to Columns during class creation."""
-        cls = self.pattern_class
-
-        # Initialize field metadata storage
-        if not hasattr(cls, "__pattern_field_types__"):
-            cls.__pattern_field_types__: dict[str, type] = {}
-        else:
-            cls.__pattern_field_types__ = dict(cls.__pattern_field_types__)
-
-        if not hasattr(cls, "__pattern_field_info__"):
-            cls.__pattern_field_info__: dict[str, dict[str, Any]] = {}
-        else:
-            cls.__pattern_field_info__ = dict(cls.__pattern_field_info__)
-
-        # Process each Field instance
-        for attr_name in dir(cls):
-            if attr_name.startswith("_"):
-                continue
-
-            if attr_name in ("id", "created_at", "updated_at"):
-                continue
-
-            try:
-                attr_value = getattr(cls, attr_name)
-            except (AttributeError, Exception):
-                continue
-
-            if isinstance(attr_value, Field):
-                # Capture field type metadata
-                cls.__pattern_field_types__[attr_name] = attr_value.field_type
-                cls.__pattern_field_info__[attr_name] = {
-                    "type": attr_value.field_type,
-                    "required": attr_value.required,
-                    "nullable": attr_value.nullable,
-                    "default": attr_value.default,
-                    "unique": attr_value.unique,
-                    "index": attr_value.index,
-                    "foreign_key": attr_value.foreign_key,
-                    "choices": attr_value.choices,
-                }
-
-                # Transform Field to Column
-                column = attr_value.to_column(attr_name)
-                setattr(cls, attr_name, column)
-
-                # Remove annotation
-                if hasattr(cls, "__annotations__") and attr_name in cls.__annotations__:
-                    del cls.__annotations__[attr_name]
-
-    def process_field_defaults(self) -> None:
-        """Process field_defaults from Pattern configuration."""
-        cls = self.pattern_class
-
-        # Start with parent defaults
-        parent_defaults = {}
-        for base in cls.__mro__[1:]:
-            if hasattr(base, "_field_defaults"):
-                parent_defaults = base._field_defaults.copy()
-                break
-
-        # Merge with current class defaults
-        if hasattr(cls, "Pattern") and hasattr(cls.Pattern, "field_defaults"):
-            field_defaults = cls.Pattern.field_defaults
-            if not isinstance(field_defaults, dict):
-                raise ValueError(
-                    f"Pattern.field_defaults must be a dictionary, got {type(field_defaults).__name__}"
-                )
-            cls._field_defaults = {**parent_defaults, **field_defaults}
-        elif parent_defaults:
-            cls._field_defaults = parent_defaults
-        else:
-            cls._field_defaults = {}
-```
-
-#### 1.3 Extract Change Tracking Extension
-
-Move change tracking logic to extension:
-
-```python
-# backend-patterns/pattern_stack/atoms/patterns/extensions/changes.py
-
-from typing import TYPE_CHECKING, Any
-from datetime import datetime, UTC
-from sqlalchemy import event, inspect
-from pattern_stack.atoms.patterns.extensions.base import PatternExtension
-from pattern_stack.atoms.shared.events import EventCategory, EventData, get_event_store
-from pattern_stack.atoms.shared.logging import get_logger
-
-if TYPE_CHECKING:
-    from pattern_stack.atoms.patterns.base import BasePattern
-
-logger = get_logger(__name__)
-
-class ChangesExtension(PatternExtension):
-    """Extension that tracks field changes and emits change events."""
-
-    def setup_class(self) -> None:
-        """Set up change tracking event listeners."""
-        if not self._should_track_changes():
-            return
-
-        cls = self.pattern_class
-
-        # Set up SQLAlchemy event listeners
-        @event.listens_for(cls, "before_update")
-        def detect_changes(mapper: Any, connection: Any, target: Any) -> None:
-            """Detect field changes before update."""
-            state = inspect(target)
-            tracked_fields = self._get_tracked_fields()
-            changes = {}
-
-            for attr in state.attrs:
-                if attr.key not in tracked_fields:
-                    continue
-
-                hist = attr.history
-                if hist.has_changes():
-                    old_value = hist.deleted[0] if hist.deleted else None
-                    new_value = hist.added[0] if hist.added else None
-
-                    if old_value == new_value:
-                        continue
-
-                    changes[attr.key] = {
-                        "old": self._serialize_value(old_value),
-                        "new": self._serialize_value(new_value),
-                    }
-
-            if changes:
-                target._pending_changes = changes
-
-        # Similar setup for after_update, after_insert, after_delete...
-
-    def _should_track_changes(self) -> bool:
-        """Check if change tracking is enabled."""
-        cls = self.pattern_class
-        if not hasattr(cls, "Pattern"):
-            return True
-        return getattr(cls.Pattern, "track_changes", True)
-
-    def _get_tracked_fields(self) -> set[str]:
-        """Get fields that should be tracked."""
-        cls = self.pattern_class
-        if not hasattr(cls, "Pattern"):
-            columns = set(cls.__table__.columns.keys())
-            return columns - {"id", "created_at", "updated_at"}
-
-        pattern_config = cls.Pattern
-        track_fields = getattr(pattern_config, "track_changes_fields", ["*"])
-        exclude_fields = getattr(pattern_config, "track_changes_exclude", ["updated_at"])
-
-        if "*" in track_fields:
-            columns = set(cls.__table__.columns.keys())
-        else:
-            columns = set(track_fields)
-
-        columns = columns - set(exclude_fields)
-        return columns - {"id", "created_at"}
-
-    @staticmethod
-    def _serialize_value(value: Any) -> Any:
-        """Serialize value for event storage."""
-        # Implementation from current BasePattern._serialize_value
-        pass
-```
-
-#### 1.4 Update BasePattern to Use Extensions
-
-Refactor BasePattern to orchestrate extensions:
-
-```python
-# backend-patterns/pattern_stack/atoms/patterns/base.py
-
-class BasePattern(UUIDMixin, Base):
-    """Abstract base class orchestrating pattern extensions."""
-
-    __abstract__ = True
-    __allow_unmapped__ = True
-
-    # Extensions registry
-    _extensions: ClassVar[dict[str, PatternExtension]] = {}
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Process extensions during class creation."""
-        super().__init_subclass__(**kwargs)
-
-        # Initialize extensions for this class
-        cls._extensions = {}
-
-        # Fields extension (always enabled)
-        from pattern_stack.atoms.patterns.extensions.fields import FieldsExtension
-        fields_ext = FieldsExtension(cls)
-        fields_ext.setup_class()
-        fields_ext.process_field_defaults()
-        cls._extensions["fields"] = fields_ext
-
-        # Don't process other extensions for abstract classes
-        if cls.__dict__.get("__abstract__", False):
-            return
-
-        # Changes extension (conditional)
-        from pattern_stack.atoms.patterns.extensions.changes import ChangesExtension
-        if hasattr(cls, "Pattern") and getattr(cls.Pattern, "track_changes", True):
-            changes_ext = ChangesExtension(cls)
-            changes_ext.setup_class()
-            cls._extensions["changes"] = changes_ext
-
-        # Continue with existing logic...
-```
-
-### File Structure
-
-```
-backend-patterns/pattern_stack/atoms/patterns/
-├── __init__.py
-├── base.py                    # Modified: Uses extensions
-├── extensions/                # New directory
-│   ├── __init__.py
-│   ├── base.py               # PatternExtension base class
-│   ├── fields.py             # Field processing
-│   ├── changes.py            # Change tracking
-│   └── events.py             # NEW: Event emission (Phase 3)
-└── [existing files...]
-```
-
-### Migration Safety
-
-- Non-breaking: All existing functionality remains accessible
-- Tests: Existing tests should pass without modification
-- Backwards compatible: Old code continues to work
-
-## Phase 2: Notification Subsystem
+## Phase 1: Notification Subsystem
 
 **Goal**: Create pluggable notification infrastructure for broadcasting events.
 
 ### Dependencies
-- Phase 1 (BasePattern refactor provides foundation)
+- None (standalone subsystem)
 
 ### Tasks
 
-#### 2.1 Create Notification Base Interface
+#### 1.1 Create Notification Base Interface
 
 Following the cache subsystem pattern:
 
@@ -445,7 +142,7 @@ class NotificationBackend(ABC):
         pass
 ```
 
-#### 2.2 Implement Redis Backend
+#### 1.2 Implement Redis Backend
 
 ```python
 # backend-patterns/pattern_stack/atoms/notifications/backends/redis.py
@@ -603,7 +300,7 @@ class RedisNotificationBackend(NotificationBackend):
         logger.info("Redis notification backend closed")
 ```
 
-#### 2.3 Implement Memory Backend (Testing)
+#### 1.3 Implement Memory Backend (Testing)
 
 ```python
 # backend-patterns/pattern_stack/atoms/notifications/backends/memory.py
@@ -653,7 +350,7 @@ class MemoryNotificationBackend(NotificationBackend):
         self._subscriptions.clear()
 ```
 
-#### 2.4 Create Factory and Service
+#### 1.4 Create Factory and Service
 
 ```python
 # backend-patterns/pattern_stack/atoms/notifications/factory.py
@@ -699,7 +396,7 @@ def get_notifications() -> NotificationBackend:
     return _notification_backend
 ```
 
-#### 2.5 Settings Integration
+#### 1.5 Settings Integration
 
 ```python
 # backend-patterns/pattern_stack/atoms/config/settings.py
@@ -729,17 +426,17 @@ backend-patterns/pattern_stack/atoms/notifications/
 └── types.py                   # Shared types
 ```
 
-## Phase 3: Sync Extension
+## Phase 2: Sync Extension
 
 **Goal**: Add sync capabilities to BasePattern via new extension.
 
 ### Dependencies
-- Phase 1 (Extension architecture)
-- Phase 2 (Notification subsystem)
+- BasePattern extension architecture (prerequisite)
+- Phase 1 (Notification subsystem)
 
 ### Tasks
 
-#### 3.1 Create Sync Extension
+#### 2.1 Create Sync Extension
 
 ```python
 # backend-patterns/pattern_stack/atoms/patterns/extensions/sync.py
@@ -854,14 +551,16 @@ class SyncExtension(PatternExtension):
         return await event_store.query(filters)
 ```
 
-#### 3.2 Update BasePattern to Include Sync Extension
+#### 2.2 Update BasePattern to Include Sync Extension
+
+Integration point (assumes extension architecture exists):
 
 ```python
 # backend-patterns/pattern_stack/atoms/patterns/base.py
 
 def __init_subclass__(cls, **kwargs: Any) -> None:
     """Process extensions during class creation."""
-    # ... existing code ...
+    # ... existing extension setup code ...
 
     # Sync extension (conditional on Pattern.sync_mode)
     if hasattr(cls, "Pattern"):
@@ -874,7 +573,7 @@ def __init_subclass__(cls, **kwargs: Any) -> None:
             logger.info(f"Enabled event sync for {cls.__name__}")
 ```
 
-#### 3.3 Pattern Configuration
+#### 2.3 Pattern Configuration
 
 ```python
 # Usage in application models
@@ -895,7 +594,7 @@ class Order(EventPattern):
     # Fields...
 ```
 
-#### 3.4 Discovery Function
+#### 2.4 Discovery Function
 
 ```python
 # backend-patterns/pattern_stack/atoms/app/discovery.py
@@ -974,16 +673,16 @@ class OrderEntity:
         )
 ```
 
-## Phase 4: Router Generation
+## Phase 3: Router Generation
 
 **Goal**: Auto-generate event batch endpoints for discovered syncable models.
 
 ### Dependencies
-- Phase 3 (Sync extension and discovery)
+- Phase 2 (Sync extension and discovery)
 
 ### Tasks
 
-#### 4.1 Create Events Router Factory
+#### 3.1 Create Events Router Factory
 
 ```python
 # backend-patterns/pattern_stack/atoms/api/routers/events.py
@@ -1052,7 +751,7 @@ def create_events_router(
 
         for event_name in sync_events:
             event_type = f"{entity_type}.{event_name}"
-            # Register handler (to be implemented in Phase 5)
+            # Register handler (to be implemented in Phase 4)
             event_handlers[event_type] = (model_class, event_name)
 
     @router.post("/batch", response_model=EventBatchResponse)
@@ -1162,7 +861,7 @@ def create_events_router(
     return router
 ```
 
-#### 4.2 App Factory Integration
+#### 3.2 App Factory Integration
 
 ```python
 # backend-patterns/pattern_stack/atoms/app/factory.py
@@ -1189,16 +888,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 ```
 
-## Phase 5: Frontend Generation
+## Phase 4: Frontend Generation
 
 **Goal**: Generate TypeScript event store, materializers, sync engine, and React hooks.
 
 ### Dependencies
-- Phase 4 (Backend endpoints available)
+- Phase 3 (Backend endpoints available)
 
 ### Tasks
 
-#### 5.1 Update OpenAPI Generator
+#### 4.1 Update OpenAPI Generator
 
 Parse `x-sync` extensions from OpenAPI spec:
 
@@ -1241,7 +940,7 @@ export function parseOpenAPISpec(spec: any): EntitySpec[] {
 }
 ```
 
-#### 5.2 Generate Event Store
+#### 4.2 Generate Event Store
 
 ```typescript
 // sync-patterns/src/generators/event-store-generator.ts
@@ -1303,7 +1002,7 @@ export async function getEventsForEntity(/* ... */): Promise<LocalEvent[]> {
 }
 ```
 
-#### 5.3 Generate Materializers
+#### 4.3 Generate Materializers
 
 For each entity with `sync_mode='events'`:
 
@@ -1357,7 +1056,7 @@ ${generateEventHandlers(entity)}
 }
 ```
 
-#### 5.4 Generate Sync Engine
+#### 4.4 Generate Sync Engine
 
 ```typescript
 // sync-patterns/src/generators/sync-engine-generator.ts
@@ -1407,7 +1106,7 @@ export const syncEngine = new SyncEngine()
 }
 ```
 
-#### 5.5 Generate React Hooks
+#### 4.5 Generate React Hooks
 
 ```typescript
 // sync-patterns/src/generators/hook-generator.ts
@@ -1490,7 +1189,7 @@ src/generated/
     └── methods.ts                # API client (includes event endpoints)
 ```
 
-## Phase 6: Integration & Testing
+## Phase 5: Integration & Testing
 
 **Goal**: Validate end-to-end functionality with real-world scenario.
 
@@ -1499,7 +1198,7 @@ src/generated/
 
 ### Tasks
 
-#### 6.1 Create Test Application
+#### 5.1 Create Test Application
 
 Set up sales-patterns example with Order entity:
 
@@ -1528,7 +1227,7 @@ class Order(EventPattern):
     items = Field(JSON, default=list)
 ```
 
-#### 6.2 Generate Frontend Code
+#### 5.2 Generate Frontend Code
 
 Run sync-patterns generator:
 
@@ -1539,7 +1238,7 @@ sync-patterns generate \
   --output ../frontend/src/generated
 ```
 
-#### 6.3 Multi-Device Sync Test
+#### 5.3 Multi-Device Sync Test
 
 Test scenario:
 1. Device A (offline): Create order, add 3 items
@@ -1548,7 +1247,7 @@ Test scenario:
 4. Verify both devices see both orders
 5. Verify timestamps preserved correctly
 
-#### 6.4 Offline Survival Test
+#### 5.4 Offline Survival Test
 
 Test scenario:
 1. Create order with 5 items
@@ -1558,7 +1257,7 @@ Test scenario:
 5. Add more items offline
 6. Reconnect and verify sync
 
-#### 6.5 Performance Benchmarks
+#### 5.5 Performance Benchmarks
 
 Measure:
 - UI response time (< 5ms target)
@@ -1575,12 +1274,8 @@ backend-patterns/
 ├── pattern_stack/atoms/
 │   ├── patterns/
 │   │   ├── base.py                          # Modified: Extension orchestration
-│   │   └── extensions/                      # New directory
-│   │       ├── __init__.py
-│   │       ├── base.py                      # PatternExtension base
-│   │       ├── fields.py                    # Field processing
-│   │       ├── changes.py                   # Change tracking
-│   │       └── sync.py                      # Event emission
+│   │   └── extensions/
+│   │       └── sync.py                      # Event emission (uses extension system)
 │   ├── notifications/                       # New subsystem
 │   │   ├── __init__.py
 │   │   ├── base.py                          # NotificationBackend interface
@@ -1703,7 +1398,7 @@ const { addItem } = useOrderMutations()
 
 ### Non-Breaking Changes
 
-Phase 1-4 add new features without removing existing functionality:
+Phases 1-4 add new features without removing existing functionality:
 - Old sync modes continue to work
 - New `sync_mode="events"` is opt-in
 - Existing tests pass unchanged
@@ -1729,7 +1424,7 @@ Once migration is complete, these will be deprecated:
 
 **Recommendation**: Start with last-write-wins. Add custom merge handlers for specific entities if needed (e.g., collaborative editing).
 
-**Decision needed**: Phase 3
+**Decision needed**: Phase 2
 
 ### 2. Event Retention & Compaction
 
@@ -1747,7 +1442,7 @@ Once migration is complete, these will be deprecated:
 
 **Recommendation**: 7-day default with configurable retention. Implement snapshot compaction in future iteration.
 
-**Decision needed**: Phase 5
+**Decision needed**: Phase 4
 
 ### 3. Multi-Tenant Event Isolation
 
@@ -1765,7 +1460,7 @@ Once migration is complete, these will be deprecated:
 
 **Recommendation**: Add `tenant_id` to LocalEvent and ClientEvent. Filter all queries by tenant. Namespace notification channels.
 
-**Decision needed**: Phase 3 (backend) and Phase 5 (frontend)
+**Decision needed**: Phase 2 (backend) and Phase 4 (frontend)
 
 ### 4. Error Recovery & Retry
 
@@ -1788,7 +1483,7 @@ Once migration is complete, these will be deprecated:
 - Transient errors: retry with exponential backoff
 - After 3 retries: surface in UI with retry/discard options
 
-**Decision needed**: Phase 4
+**Decision needed**: Phase 3
 
 ### 5. Schema Evolution
 
@@ -1807,7 +1502,7 @@ Once migration is complete, these will be deprecated:
 
 **Recommendation**: Add `schema_version` to events. Support backward compatibility (new code reads old events). Provide migration tools.
 
-**Decision needed**: Phase 5
+**Decision needed**: Phase 4
 
 ### 6. WebSocket vs ElectricSQL vs Polling
 
@@ -1828,35 +1523,31 @@ Once migration is complete, these will be deprecated:
 - Postgres shops: ElectricSQL
 - Fallback: Polling (no-push scenarios)
 
-**Decision needed**: Phase 2
+**Decision needed**: Phase 1
 
 ## Timeline Breakdown
 
 ### Phase Dependencies
 
 ```
-Phase 1: BasePattern Refactor
+Phase 1: Notification Subsystem
 ├─ No dependencies
-└─ Outputs: Extension architecture
-
-Phase 2: Notification Subsystem
-├─ Depends on: Phase 1 (conceptually, not technically)
 └─ Outputs: Notification backends
 
-Phase 3: Sync Extension
-├─ Depends on: Phase 1 (extension system)
-├─ Depends on: Phase 2 (notification subsystem)
+Phase 2: Sync Extension
+├─ Depends on: Extension architecture (prerequisite)
+├─ Depends on: Phase 1 (notification subsystem)
 └─ Outputs: Event emission, discovery
 
-Phase 4: Router Generation
-├─ Depends on: Phase 3 (discovery function)
+Phase 3: Router Generation
+├─ Depends on: Phase 2 (discovery function)
 └─ Outputs: /events/batch endpoint
 
-Phase 5: Frontend Generation
-├─ Depends on: Phase 4 (API endpoints)
+Phase 4: Frontend Generation
+├─ Depends on: Phase 3 (API endpoints)
 └─ Outputs: TypeScript event store, hooks
 
-Phase 6: Integration Testing
+Phase 5: Integration Testing
 ├─ Depends on: All phases
 └─ Outputs: Validated system
 ```
@@ -1864,23 +1555,20 @@ Phase 6: Integration Testing
 ### Parallel Work Opportunities
 
 **Can run in parallel:**
-- Phase 1 (backend refactor) + Phase 5 (frontend generator updates)
-- Phase 2 (notifications) + Phase 1 completion work
-- Phase 3 tests + Phase 4 implementation
+- Phase 1 (notifications) + Phase 4 (frontend generator updates)
+- Phase 2 tests + Phase 3 implementation
 
 **Must be sequential:**
-- Phase 3 requires Phase 1 complete
-- Phase 4 requires Phase 3 complete
-- Phase 6 requires Phases 4 & 5 complete
+- Phase 2 requires Phase 1 complete
+- Phase 3 requires Phase 2 complete
+- Phase 5 requires Phases 3 & 4 complete
 
 ### Risk Mitigation
 
 **High Risk Areas:**
-1. BasePattern refactor (Phase 1) - touches core framework
-   - Mitigation: Comprehensive test coverage, gradual rollout
-2. Event ordering conflicts (Phase 6) - distributed systems problem
+1. Event ordering conflicts (Phase 5) - distributed systems problem
    - Mitigation: Start with simple timestamp ordering, add complexity if needed
-3. Browser storage limits (Phase 5) - IndexedDB quotas
+2. Browser storage limits (Phase 4) - IndexedDB quotas
    - Mitigation: Implement retention policy, monitoring
 
 **Low Risk Areas:**
@@ -1932,7 +1620,7 @@ Phase 6: Integration Testing
 3. **Assign phases** to team members
 4. **Set up tracking** - Linear issues for each phase
 5. **Create branch strategy** - feature branches per phase
-6. **Begin Phase 1** - BasePattern refactor
+6. **Begin Phase 1** - Notification subsystem
 
 ## References
 
