@@ -482,19 +482,14 @@ export class EntityGenerator {
       lines.push(`import { ${collectionBaseName}RealtimeCollection } from '../collections/${kebabName}.realtime'`)
     }
 
-    // Import RxDB offline helpers for entities that support it
+    // Import offline executor actions for entities that support it
     if (supportsOffline) {
       const kebabName = this.toKebabCase(namePlural)
-      const singularPascal = pascalName
-      lines.push("import { useState, useEffect } from 'react'")
       lines.push(`import {`)
-      lines.push(`  get${pascalName}sOfflineCollection,`)
-      lines.push(`  createOffline${singularPascal},`)
-      lines.push(`  updateOffline${singularPascal},`)
-      lines.push(`  deleteOffline${singularPascal},`)
-      lines.push(`} from '../collections/${kebabName}.offline'`)
-      lines.push("import type { RxCollection } from 'rxdb'")
-      lines.push(`import type { ${singularPascal}Document } from '../schemas/${kebabName}.rxdb-schema'`)
+      lines.push(`  createOffline${pascalName},`)
+      lines.push(`  updateOffline${pascalName},`)
+      lines.push(`  deleteOffline${pascalName},`)
+      lines.push(`} from '../offline/${kebabName}.actions'`)
     }
 
     // Import hooks as namespace for internal use
@@ -510,22 +505,10 @@ export class EntityGenerator {
     lines.push('')
 
     // =========================================================================
-    // SECTION 3.5: RxDB React hook helper for offline mode
-    // =========================================================================
-    if (supportsOffline) {
-      lines.push('// ============================================================================')
-      lines.push('// RXDB REACT HOOK - Reactive queries for offline mode')
-      lines.push('// ============================================================================')
-      lines.push('')
-      lines.push(this.generateRxQueryHook(entity))
-      lines.push('')
-    }
-
-    // =========================================================================
     // SECTION 4: Unified wrapper functions
     // =========================================================================
     lines.push('// ============================================================================')
-    lines.push('// UNIFIED WRAPPERS - Abstract TanStack DB vs Query vs RxDB')
+    lines.push('// UNIFIED WRAPPERS - Abstract TanStack DB vs Query vs Offline Executor')
     lines.push('// ============================================================================')
     lines.push('')
 
@@ -563,78 +546,6 @@ export class EntityGenerator {
   }
 
   /**
-   * Generate the useRxQuery helper hook for RxDB reactive queries
-   */
-  private generateRxQueryHook(entity: EntityInfo): string {
-    const { pascalName } = entity
-    const docType = `${pascalName}Document`
-    const getCollectionFn = `get${pascalName}sOfflineCollection`
-
-    return `/**
- * React hook for RxDB reactive queries
- * Subscribes to collection changes and returns live data
- */
-function useRxQuery<T>(
-  queryFn: (collection: RxCollection<${docType}>) => Promise<T>,
-  deps: unknown[] = []
-): { data: T | undefined; isLoading: boolean; error: Error | null } {
-  const [data, setData] = useState<T | undefined>(undefined)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    let subscription: { unsubscribe: () => void } | null = null
-
-    async function subscribe() {
-      try {
-        const collection = await ${getCollectionFn}()
-
-        // Subscribe to all changes in the collection
-        subscription = collection.$.subscribe(async () => {
-          if (cancelled) return
-          try {
-            const result = await queryFn(collection)
-            if (!cancelled) {
-              setData(result)
-              setIsLoading(false)
-            }
-          } catch (err) {
-            if (!cancelled) {
-              setError(err as Error)
-              setIsLoading(false)
-            }
-          }
-        })
-
-        // Initial fetch
-        const result = await queryFn(collection)
-        if (!cancelled) {
-          setData(result)
-          setIsLoading(false)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err as Error)
-          setIsLoading(false)
-        }
-      }
-    }
-
-    subscribe()
-
-    return () => {
-      cancelled = true
-      subscription?.unsubscribe()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-
-  return { data, isLoading, error }
-}`
-  }
-
-  /**
    * Generate list hook supporting configured modes
    */
   private generateListHookAllModes(entity: EntityInfo, operation: CrudOperation, supportsRealtime: boolean, supportsOffline: boolean): string {
@@ -648,7 +559,7 @@ function useRxQuery<T>(
       lines.push('/**')
       lines.push(` * Fetch all ${namePlural}.`)
       lines.push(supportsRealtime || supportsOffline
-        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        ? ' * Unified wrapper - uses TanStack DB, Offline Executor, or Query based on config.'
         : ' * Unified wrapper - uses TanStack Query.')
       lines.push(' */')
     }
@@ -660,19 +571,16 @@ function useRxQuery<T>(
       lines.push('')
     }
 
-    // RxDB offline mode - must be called unconditionally due to React hooks rules
+    // Offline mode - uses TanStack Query (offline executor wraps mutations)
     if (supportsOffline) {
-      lines.push('  // RxDB offline mode - persistent IndexedDB storage')
-      lines.push(`  const offlineResult = useRxQuery<${entityType}[]>(`)
-      lines.push('    async (collection) => {')
-      lines.push('      const docs = await collection.find().exec()')
-      lines.push(`      return docs.map((doc) => doc.toJSON() as unknown as ${entityType})`)
-      lines.push('    },')
-      lines.push('    []')
-      lines.push('  )')
-      lines.push('')
+      lines.push("  // Offline mode - uses TanStack Query with offline mutations")
       lines.push("  if (mode === 'offline') {")
-      lines.push('    return offlineResult')
+      lines.push(`    const result = hooks.${operation.hookName}()`)
+      lines.push('    return {')
+      lines.push(`      data: result.data as ${entityType}[] | undefined,`)
+      lines.push('      isLoading: result.isLoading,')
+      lines.push('      error: (result.error as Error) ?? null,')
+      lines.push('    }')
       lines.push('  }')
       lines.push('')
     }
@@ -731,7 +639,7 @@ function useRxQuery<T>(
       lines.push('/**')
       lines.push(` * Fetch a single ${name} by ID.`)
       lines.push(supportsRealtime || supportsOffline
-        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        ? ' * Unified wrapper - uses TanStack DB, Offline Executor, or Query based on config.'
         : ' * Unified wrapper - uses TanStack Query.')
       lines.push(' */')
     }
@@ -743,19 +651,16 @@ function useRxQuery<T>(
       lines.push('')
     }
 
-    // RxDB offline mode
+    // Offline mode
     if (supportsOffline) {
-      lines.push('  // RxDB offline mode')
-      lines.push(`  const offlineResult = useRxQuery<${entityType} | undefined>(`)
-      lines.push('    async (collection) => {')
-      lines.push('      const doc = await collection.findOne(id).exec()')
-      lines.push(`      return doc ? (doc.toJSON() as unknown as ${entityType}) : undefined`)
-      lines.push('    },')
-      lines.push('    [id]')
-      lines.push('  )')
-      lines.push('')
+      lines.push('  // Offline mode - uses TanStack Query')
       lines.push("  if (mode === 'offline') {")
-      lines.push('    return offlineResult')
+      lines.push(`    const result = hooks.${operation.hookName}({ ${paramName}: id })`)
+      lines.push('    return {')
+      lines.push(`      data: result.data as ${entityType} | undefined,`)
+      lines.push('      isLoading: result.isLoading,')
+      lines.push('      error: (result.error as Error) ?? null,')
+      lines.push('    }')
       lines.push('  }')
       lines.push('')
     }
@@ -806,7 +711,7 @@ function useRxQuery<T>(
       lines.push('/**')
       lines.push(` * Create a new ${entity.name}.`)
       lines.push(supportsRealtime || supportsOffline
-        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        ? ' * Unified wrapper - uses TanStack DB, Offline Executor, or Query based on config.'
         : ' * Unified wrapper - uses TanStack Query.')
       lines.push(' */')
     }
@@ -818,17 +723,23 @@ function useRxQuery<T>(
       lines.push('')
     }
 
-    // Offline mode
+    // Offline mode - uses offline action (fire-and-forget optimistic)
     if (supportsOffline) {
-      const docType = `${pascalName}Document`
       lines.push("  if (mode === 'offline') {")
       lines.push('    return {')
       lines.push(`      mutate: (data: ${createType}) => {`)
-      lines.push(`        createOffline${pascalName}(data as unknown as Omit<${docType}, 'id' | 'created_at' | 'updated_at'>)`)
+      lines.push(`        createOffline${pascalName}(data)`)
       lines.push('      },')
       lines.push(`      mutateAsync: async (data: ${createType}) => {`)
-      lines.push(`        const doc = await createOffline${pascalName}(data as unknown as Omit<${docType}, 'id' | 'created_at' | 'updated_at'>)`)
-      lines.push(`        return doc as unknown as ${entityType}`)
+      lines.push('        // Offline actions are fire-and-forget, return optimistic entity')
+      lines.push('        const newItem = {')
+      lines.push('          ...data,')
+      lines.push('          id: crypto.randomUUID(),')
+      lines.push('          created_at: new Date().toISOString(),')
+      lines.push('          updated_at: new Date().toISOString(),')
+      lines.push(`        } as unknown as ${entityType}`)
+      lines.push(`        createOffline${pascalName}(data)`)
+      lines.push('        return newItem')
       lines.push('      },')
       lines.push('      isPending: false,')
       lines.push('      error: null,')
@@ -896,7 +807,7 @@ function useRxQuery<T>(
       lines.push('/**')
       lines.push(` * Update an existing ${entity.name}.`)
       lines.push(supportsRealtime || supportsOffline
-        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        ? ' * Unified wrapper - uses TanStack DB, Offline Executor, or Query based on config.'
         : ' * Unified wrapper - uses TanStack Query.')
       lines.push(' */')
     }
@@ -908,17 +819,17 @@ function useRxQuery<T>(
       lines.push('')
     }
 
-    // Offline mode
+    // Offline mode - uses offline action (fire-and-forget optimistic)
     if (supportsOffline) {
-      const docType = `${pascalName}Document`
       lines.push("  if (mode === 'offline') {")
       lines.push('    return {')
       lines.push(`      mutate: ({ id, data }: { id: string; data: ${updateType} }) => {`)
-      lines.push(`        updateOffline${pascalName}(id, data as unknown as Partial<${docType}>)`)
+      lines.push(`        updateOffline${pascalName}({ id, data })`)
       lines.push('      },')
       lines.push(`      mutateAsync: async ({ id, data }: { id: string; data: ${updateType} }) => {`)
-      lines.push(`        const doc = await updateOffline${pascalName}(id, data as unknown as Partial<${docType}>)`)
-      lines.push(`        return doc as unknown as ${entityType}`)
+      lines.push('        // Offline actions are fire-and-forget, return optimistic entity')
+      lines.push(`        updateOffline${pascalName}({ id, data })`)
+      lines.push(`        return { id, ...data, updated_at: new Date().toISOString() } as unknown as ${entityType}`)
       lines.push('      },')
       lines.push('      isPending: false,')
       lines.push('      error: null,')
@@ -973,7 +884,7 @@ function useRxQuery<T>(
       lines.push('/**')
       lines.push(` * Delete ${this.getArticle(entity.name)} ${entity.name}.`)
       lines.push(supportsRealtime || supportsOffline
-        ? ' * Unified wrapper - uses TanStack DB, RxDB, or Query based on config.'
+        ? ' * Unified wrapper - uses TanStack DB, Offline Executor, or Query based on config.'
         : ' * Unified wrapper - uses TanStack Query.')
       lines.push(' */')
     }
@@ -985,7 +896,7 @@ function useRxQuery<T>(
       lines.push('')
     }
 
-    // Offline mode
+    // Offline mode - uses offline action
     if (supportsOffline) {
       lines.push("  if (mode === 'offline') {")
       lines.push('    return {')

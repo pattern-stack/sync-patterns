@@ -11,8 +11,10 @@ import type { ParsedOpenAPI, ParsedEndpoint } from './parser.js'
 export interface GeneratedCollections {
   /** Map of entity name to realtime collection code (ElectricSQL) */
   realtimeCollections: Map<string, string>
-  /** Map of entity name to offline collection code (RxDB) */
-  offlineCollections: Map<string, string>
+  /** Map of entity name to offline action code (OfflineExecutor) */
+  offlineActions: Map<string, string>
+  /** Offline executor singleton (if any offline entities exist) */
+  offlineExecutor: string | null
   /** Combined index file */
   index: string
 }
@@ -35,7 +37,7 @@ export class CollectionGenerator {
 
   generate(parsedAPI: ParsedOpenAPI): GeneratedCollections {
     const realtimeCollections = new Map<string, string>()
-    const offlineCollections = new Map<string, string>()
+    const offlineActions = new Map<string, string>()
 
     // Extract entities by sync mode
     const { realtimeEntities, offlineEntities } = this.extractEntitiesBySyncMode(parsedAPI.endpoints)
@@ -46,19 +48,24 @@ export class CollectionGenerator {
       realtimeCollections.set(entityName, code)
     }
 
-    // Generate offline collections (RxDB)
+    // Generate offline action files (OfflineExecutor)
     for (const [entityName, endpoint] of Object.entries(offlineEntities)) {
-      const code = this.generateOfflineCollectionFile(entityName, endpoint)
-      offlineCollections.set(entityName, code)
+      const code = this.generateOfflineActionsFile(entityName, endpoint)
+      offlineActions.set(entityName, code)
     }
+
+    // Generate offline executor singleton if we have offline entities
+    const offlineExecutor = Object.keys(offlineEntities).length > 0
+      ? this.generateOfflineExecutorFile(Object.keys(offlineEntities))
+      : null
 
     // Generate index file
     const index = this.generateIndexFile(
       Array.from(realtimeCollections.keys()),
-      Array.from(offlineCollections.keys())
+      Array.from(offlineActions.keys())
     )
 
-    return { realtimeCollections, offlineCollections, index }
+    return { realtimeCollections, offlineActions, offlineExecutor, index }
   }
 
   /**
@@ -228,123 +235,223 @@ export class CollectionGenerator {
     return lines.join('\n')
   }
 
-  private generateOfflineCollectionFile(entityName: string, endpoint: ParsedEndpoint): string {
+  /**
+   * Generate offline executor singleton file
+   */
+  private generateOfflineExecutorFile(entityNames: string[]): string {
+    const lines: string[] = []
+
+    // File header
+    lines.push(this.generateFileHeader('Offline Executor'))
+    lines.push('')
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(' * Offline transaction executor singleton')
+      lines.push(' *')
+      lines.push(' * Manages offline mutations with:')
+      lines.push(' * - IndexedDB transaction storage')
+      lines.push(' * - Leader election across tabs')
+      lines.push(' * - Retry with exponential backoff')
+      lines.push(' * - Idempotency keys')
+      lines.push(' */')
+    }
+    lines.push('')
+
+    // Imports
+    lines.push("import { createCollection } from '@tanstack/react-db'")
+    lines.push("import { queryCollectionOptions } from '@tanstack/query-db-collection'")
+    lines.push("import { startOfflineExecutor, IndexedDBAdapter } from '@tanstack/offline-transactions'")
+    lines.push("import type { PendingMutation } from '@tanstack/db'")
+    lines.push("import { QueryClient } from '@tanstack/react-query'")
+    lines.push("import { apiClient } from '../client/index'")
+    lines.push('')
+
+    // Query client singleton
+    lines.push('// Shared query client for offline operations')
+    lines.push('export const offlineQueryClient = new QueryClient()')
+    lines.push('')
+
+    // Generate collections for each offline entity
+    for (const entityName of entityNames) {
+      const pascalName = this.toPascalCase(entityName)
+      const singularName = this.singularize(entityName)
+      const pascalSingular = this.toPascalCase(singularName)
+
+      lines.push(`// ${pascalName} collection`)
+      lines.push(`export const ${entityName}Collection = createCollection(`)
+      lines.push('  queryCollectionOptions({')
+      lines.push(`    queryKey: ['${entityName}'],`)
+      lines.push(`    queryFn: async () => {`)
+      lines.push(`      const response = await apiClient.list${pascalName}({})`)
+      lines.push(`      return response.items ?? response`)
+      lines.push(`    },`)
+      lines.push(`    queryClient: offlineQueryClient,`)
+      lines.push(`    getKey: (item: { id: string }) => item.id,`)
+      lines.push('  })')
+      lines.push(')')
+      lines.push('')
+    }
+
+    // Generate sync functions for each entity
+    lines.push('// Sync functions for offline mutations')
+    for (const entityName of entityNames) {
+      const pascalName = this.toPascalCase(entityName)
+      const singularName = this.singularize(entityName)
+      const pascalSingular = this.toPascalCase(singularName)
+
+      lines.push(`async function sync${pascalSingular}({`)
+      lines.push('  transaction,')
+      lines.push('  idempotencyKey,')
+      lines.push('}: {')
+      lines.push('  transaction: { mutations: Array<PendingMutation> }')
+      lines.push('  idempotencyKey: string')
+      lines.push('}) {')
+      lines.push('  for (const mutation of transaction.mutations) {')
+      lines.push("    const headers = { 'Idempotency-Key': idempotencyKey }")
+      lines.push("    switch (mutation.type) {")
+      lines.push("      case 'insert':")
+      lines.push(`        await apiClient.create${pascalSingular}({ data: mutation.modified, headers })`)
+      lines.push('        break')
+      lines.push("      case 'update':")
+      lines.push(`        await apiClient.update${pascalSingular}WithTracking(mutation.key as string, { data: mutation.changes, headers })`)
+      lines.push('        break')
+      lines.push("      case 'delete':")
+      lines.push(`        await apiClient.archive${pascalSingular}(mutation.key as string, { headers })`)
+      lines.push('        break')
+      lines.push('    }')
+      lines.push('  }')
+      lines.push(`  await ${entityName}Collection.utils.refetch()`)
+      lines.push('}')
+      lines.push('')
+    }
+
+    // Generate executor with all collections and mutation functions
+    lines.push('/**')
+    lines.push(' * Global offline executor instance')
+    lines.push(' * Shared across all offline entities')
+    lines.push(' */')
+    lines.push('export const offlineExecutor = startOfflineExecutor({')
+    lines.push('  collections: {')
+    for (const entityName of entityNames) {
+      lines.push(`    ${entityName}: ${entityName}Collection,`)
+    }
+    lines.push('  },')
+    lines.push("  storage: new IndexedDBAdapter('app-db', 'transactions'),")
+    lines.push('  mutationFns: {')
+    for (const entityName of entityNames) {
+      const singularName = this.singularize(entityName)
+      const pascalSingular = this.toPascalCase(singularName)
+      lines.push(`    sync${pascalSingular},`)
+    }
+    lines.push('  },')
+    lines.push('  onLeadershipChange: (isLeader: boolean) => {')
+    lines.push('    if (!isLeader) {')
+    lines.push("      console.warn('[Offline] Running in follower mode (another tab is leader)')")
+    lines.push('    } else {')
+    lines.push("      console.info('[Offline] Running in leader mode')")
+    lines.push('    }')
+    lines.push('  },')
+    lines.push('})')
+    lines.push('')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate offline actions file for an entity
+   */
+  private generateOfflineActionsFile(entityName: string, endpoint: ParsedEndpoint): string {
     const lines: string[] = []
     const singularName = this.singularize(entityName)
     const pascalSingular = this.toPascalCase(singularName)
-    const kebabName = this.toKebabCase(entityName)
 
     // File header
-    lines.push(this.generateFileHeader(`${pascalSingular} Offline Collection`))
+    lines.push(this.generateFileHeader(`${pascalSingular} Offline Actions`))
     lines.push('')
 
-    // Imports - use RxDB directly, not TanStack DB wrapper
-    lines.push("import { getRxDatabase } from '../rxdb/database'")
-    lines.push(`import type { ${pascalSingular}Document } from '../schemas/${kebabName}.rxdb-schema'`)
-    lines.push("import type { RxCollection } from 'rxdb'")
-    lines.push('')
-
-    // Collection cache
-    lines.push(`let collectionCache: RxCollection<${pascalSingular}Document> | null = null`)
-    lines.push('')
-
-    // getCollection helper
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * Get the ${entityName} RxDB collection`)
-      lines.push(' * Initializes the database if needed')
+      lines.push(` * Offline actions for ${pascalSingular}`)
+      lines.push(' *')
+      lines.push(' * These actions wrap mutations with offline transaction handling:')
+      lines.push(' * - Optimistic updates via collection mutations')
+      lines.push(' * - Persist pending mutations to IndexedDB')
+      lines.push(' * - Sync to server when online')
       lines.push(' */')
     }
-    lines.push(`export async function get${pascalSingular}sOfflineCollection(): Promise<`)
-    lines.push(`  RxCollection<${pascalSingular}Document>`)
-    lines.push('> {')
-    lines.push('  if (!collectionCache) {')
-    lines.push('    const db = await getRxDatabase()')
-    lines.push(`    collectionCache = db.${entityName}`)
-    lines.push('  }')
-    lines.push('  return collectionCache')
-    lines.push('}')
     lines.push('')
 
-    // createOffline helper
-    if (this.options.includeJSDoc) {
-      lines.push('/**')
-      lines.push(` * Create a new ${singularName} in the offline collection`)
-      lines.push(' */')
-    }
-    lines.push(`export async function createOffline${pascalSingular}(`)
-    lines.push(`  data: Omit<${pascalSingular}Document, 'id' | 'created_at' | 'updated_at'>`)
-    lines.push(`): Promise<${pascalSingular}Document> {`)
-    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
-    lines.push('  const now = new Date().toISOString()')
-    lines.push('')
-    lines.push('  const doc = await collection.insert({')
-    lines.push('    ...data,')
-    lines.push('    id: crypto.randomUUID(),')
-    lines.push('    created_at: now,')
-    lines.push('    updated_at: now,')
-    lines.push(`  } as ${pascalSingular}Document)`)
-    lines.push('')
-    lines.push('  return doc.toJSON()')
-    lines.push('}')
+    // Imports
+    lines.push(`import { offlineExecutor, ${entityName}Collection } from './executor'`)
+    lines.push(`import type { ${pascalSingular}Create, ${pascalSingular}Update } from '../schemas/index'`)
     lines.push('')
 
-    // updateOffline helper
+    // Create action
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * Update a ${singularName} in the offline collection`)
+      lines.push(` * Create an ${singularName} with offline support`)
+      lines.push(' *')
+      lines.push(' * Optimistically adds to collection, syncs to server when online.')
       lines.push(' */')
     }
-    lines.push(`export async function updateOffline${pascalSingular}(`)
-    lines.push('  id: string,')
-    lines.push(`  data: Partial<${pascalSingular}Document>`)
-    lines.push(`): Promise<${pascalSingular}Document> {`)
-    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
-    lines.push('  const doc = await collection.findOne(id).exec()')
-    lines.push('')
-    lines.push('  if (!doc) {')
-    lines.push(`    throw new Error(\`${pascalSingular} \${id} not found\`)`)
-    lines.push('  }')
-    lines.push('')
-    lines.push('  await doc.update({')
-    lines.push('    $set: {')
+    lines.push(`export function createOffline${pascalSingular}(data: ${pascalSingular}Create) {`)
+    lines.push(`  const tx = offlineExecutor.createOfflineTransaction({`)
+    lines.push(`    mutationFnName: 'sync${pascalSingular}',`)
+    lines.push(`    autoCommit: true,`)
+    lines.push(`  })`)
+    lines.push(`  tx.mutate(() => {`)
+    lines.push('    const newItem = {')
     lines.push('      ...data,')
+    lines.push('      id: crypto.randomUUID(),')
+    lines.push('      created_at: new Date().toISOString(),')
     lines.push('      updated_at: new Date().toISOString(),')
-    lines.push('    },')
+    lines.push('    }')
+    lines.push(`    ${entityName}Collection.insert(newItem)`)
     lines.push('  })')
-    lines.push('')
-    lines.push('  return doc.toJSON()')
+    lines.push(`  return tx.commit()`)
     lines.push('}')
     lines.push('')
 
-    // deleteOffline helper
+    // Update action
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * Delete a ${singularName} from the offline collection`)
+      lines.push(` * Update an ${singularName} with offline support`)
+      lines.push(' *')
+      lines.push(' * Optimistically updates collection, syncs to server when online.')
       lines.push(' */')
     }
-    lines.push(`export async function deleteOffline${pascalSingular}(id: string): Promise<void> {`)
-    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
-    lines.push('  const doc = await collection.findOne(id).exec()')
-    lines.push('')
-    lines.push('  if (!doc) {')
-    lines.push(`    throw new Error(\`${pascalSingular} \${id} not found\`)`)
-    lines.push('  }')
-    lines.push('')
-    lines.push('  await doc.remove()')
+    lines.push(`export function updateOffline${pascalSingular}({ id, data }: { id: string; data: ${pascalSingular}Update }) {`)
+    lines.push(`  const tx = offlineExecutor.createOfflineTransaction({`)
+    lines.push(`    mutationFnName: 'sync${pascalSingular}',`)
+    lines.push(`    autoCommit: true,`)
+    lines.push(`  })`)
+    lines.push(`  tx.mutate(() => {`)
+    lines.push(`    ${entityName}Collection.update(id, (draft) => {`)
+    lines.push('      Object.assign(draft, data, { updated_at: new Date().toISOString() })')
+    lines.push('    })')
+    lines.push('  })')
+    lines.push(`  return tx.commit()`)
     lines.push('}')
     lines.push('')
 
-    // getAllOffline helper
+    // Delete action
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(` * Get all ${entityName} from the offline collection`)
+      lines.push(` * Delete an ${singularName} with offline support`)
+      lines.push(' *')
+      lines.push(' * Optimistically removes from collection, syncs to server when online.')
       lines.push(' */')
     }
-    lines.push(`export async function getAllOffline${pascalSingular}s(): Promise<${pascalSingular}Document[]> {`)
-    lines.push(`  const collection = await get${pascalSingular}sOfflineCollection()`)
-    lines.push('  const docs = await collection.find().exec()')
-    lines.push('  return docs.map((doc) => doc.toJSON())')
+    lines.push(`export function deleteOffline${pascalSingular}(id: string) {`)
+    lines.push(`  const tx = offlineExecutor.createOfflineTransaction({`)
+    lines.push(`    mutationFnName: 'sync${pascalSingular}',`)
+    lines.push(`    autoCommit: true,`)
+    lines.push(`  })`)
+    lines.push(`  tx.mutate(() => {`)
+    lines.push(`    ${entityName}Collection.delete(id)`)
+    lines.push('  })')
+    lines.push(`  return tx.commit()`)
     lines.push('}')
     lines.push('')
 
@@ -361,7 +468,6 @@ export class CollectionGenerator {
     lines.push(' *')
     lines.push(' * Auto-generated collections for synced entities')
     lines.push(' * - Realtime: ElectricSQL (in-memory, sub-ms reactivity)')
-    lines.push(' * - Offline: RxDB (IndexedDB, persistent)')
     lines.push(' */')
     lines.push('')
 
@@ -372,24 +478,6 @@ export class CollectionGenerator {
         const camelName = this.toCamelCase(entityName)
         const fileName = this.toKebabCase(entityName)
         lines.push(`export { ${camelName}RealtimeCollection } from './${fileName}.realtime'`)
-      }
-      lines.push('')
-    }
-
-    // Export offline collections (RxDB helpers)
-    if (offlineEntities.length > 0) {
-      lines.push('// Offline collections (RxDB - IndexedDB, persistent)')
-      for (const entityName of offlineEntities.sort()) {
-        const singularName = this.singularize(entityName)
-        const pascalSingular = this.toPascalCase(singularName)
-        const fileName = this.toKebabCase(entityName)
-        lines.push(`export {`)
-        lines.push(`  get${pascalSingular}sOfflineCollection,`)
-        lines.push(`  createOffline${pascalSingular},`)
-        lines.push(`  updateOffline${pascalSingular},`)
-        lines.push(`  deleteOffline${pascalSingular},`)
-        lines.push(`  getAllOffline${pascalSingular}s,`)
-        lines.push(`} from './${fileName}.offline'`)
       }
       lines.push('')
     }

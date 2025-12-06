@@ -49,7 +49,7 @@ export class ConfigGenerator {
       lines.push(' * Sync mode determines how data is synchronized')
       lines.push(' * - api: Server-only, uses TanStack Query (no local storage)')
       lines.push(' * - realtime: ElectricSQL + TanStack DB (in-memory, sub-ms reactivity)')
-      lines.push(' * - offline: RxDB + IndexedDB (persistent, survives refresh)')
+      lines.push(' * - offline: OfflineExecutor + IndexedDB (persistent, survives refresh)')
       lines.push(' */')
     }
     lines.push("export type SyncMode = 'api' | 'realtime' | 'offline'")
@@ -58,7 +58,7 @@ export class ConfigGenerator {
     // ReplicationConfig interface
     if (this.options.includeJSDoc) {
       lines.push('/**')
-      lines.push(' * Replication retry configuration for RxDB sync')
+      lines.push(' * Replication retry configuration for offline sync')
       lines.push(' */')
     }
     lines.push('export interface ReplicationConfig {')

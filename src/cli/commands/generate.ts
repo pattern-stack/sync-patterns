@@ -181,7 +181,7 @@ export async function generateCommand(
       console.log('\nGenerating TanStack DB collections...')
       const collections = generateCollections(parsed)
 
-      const totalCollections = collections.realtimeCollections.size + collections.offlineCollections.size
+      const totalCollections = collections.realtimeCollections.size + collections.offlineActions.size
       if (totalCollections > 0) {
         const collectionsDir = join(options.output, 'collections')
         await ensureDir(collectionsDir)
@@ -196,18 +196,35 @@ export async function generateCommand(
           }
         }
 
-        // Write offline collections (RxDB)
-        for (const [name, content] of collections.offlineCollections) {
-          const fileName = `${toKebabCase(name)}.offline.ts`
-          const filePath = join(collectionsDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
         await writeFile(join(collectionsDir, 'index.ts'), collections.index)
-        console.log(`Written ${totalCollections} collections to ${collectionsDir}/`)
+        console.log(`Written ${collections.realtimeCollections.size} realtime collections to ${collectionsDir}/`)
+
+        // Generate offline executor and actions if there are offline entities
+        if (collections.offlineActions.size > 0) {
+          console.log('\nGenerating offline executor and actions...')
+          const offlineDir = join(options.output, 'offline')
+          await ensureDir(offlineDir)
+
+          // Write offline executor singleton
+          if (collections.offlineExecutor) {
+            await writeFile(join(offlineDir, 'executor.ts'), collections.offlineExecutor)
+            if (options.verbose) {
+              console.log(`  Written: ${join(offlineDir, 'executor.ts')}`)
+            }
+          }
+
+          // Write offline actions for each entity
+          for (const [name, content] of collections.offlineActions) {
+            const fileName = `${toKebabCase(name)}.actions.ts`
+            const filePath = join(offlineDir, fileName)
+            await writeFile(filePath, content)
+            if (options.verbose) {
+              console.log(`  Written: ${filePath}`)
+            }
+          }
+
+          console.log(`Written offline executor and ${collections.offlineActions.size} action files to ${offlineDir}/`)
+        }
       } else {
         console.log('  No local_first: true entities found, skipping collections')
       }
