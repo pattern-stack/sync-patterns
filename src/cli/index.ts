@@ -7,6 +7,7 @@
 import { Command } from 'commander'
 import { generateCommand } from './commands/generate.js'
 import { schemaCheckCommand } from './commands/schema-check.js'
+import { exploreCommand } from './commands/explore.js'
 
 const program = new Command()
 
@@ -67,6 +68,26 @@ program
   .option('--hash-file <file>', 'Custom hash file location')
   .action(schemaCheckCommand)
 
+// Explore command
+program
+  .command('explore')
+  .description('Interactive TUI for exploring generated entities')
+  .option('--entity <name>', 'Start with specific entity')
+  .option('--id <id>', 'Open specific record detail')
+  .option(
+    '--api-url <url>',
+    'Backend API URL',
+    process.env.SYNC_PATTERNS_API_URL || 'http://localhost:8000/api/v1'
+  )
+  .option('--mode <mode>', 'Force sync mode (optimistic|confirmed)')
+  .option('--no-cache', 'Disable caching')
+  .option('--generate', 'Regenerate code before exploring')
+  .option('--config <path>', 'Custom config file path')
+  .option('--theme <theme>', 'Color theme (light|dark|auto)', 'auto')
+  .option('--page-size <n>', 'Records per page', '25')
+  .option('--debug', 'Enable debug logging')
+  .action(exploreCommand)
+
 // Help command
 program
   .command('help')
@@ -79,6 +100,7 @@ Generate typed clients from OpenAPI specs with Zod runtime validation.
 
 Commands:
   generate <source>      Generate code from OpenAPI spec
+  explore                Interactive TUI for exploring entities
   schema:check           Check for schema drift in offline mode entities
   help                   Show this help message
 
@@ -86,11 +108,15 @@ Examples:
   sync-patterns generate ./openapi.json
   sync-patterns generate ./openapi.json --output ./src/api
   sync-patterns generate https://api.example.com/openapi.json --dry-run
+  sync-patterns explore
+  sync-patterns explore --entity contacts
+  sync-patterns explore --entity contacts --id abc-123
   sync-patterns schema:check --input ./openapi.json
   sync-patterns schema:check --input ./openapi.json --fix
 
 For more information:
   sync-patterns generate --help
+  sync-patterns explore --help
   sync-patterns schema:check --help
 `)
   })
