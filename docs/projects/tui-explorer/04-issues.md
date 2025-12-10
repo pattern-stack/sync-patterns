@@ -18,7 +18,7 @@
 
 ## Phase 1: Read-Only MVP
 
-### [ ] Issue 1: TUI Foundation & CLI Command
+### [x] Issue 1: TUI Foundation & CLI Command
 
 **Priority**: P0 (Critical)
 **Estimate**: 3 points
@@ -30,14 +30,14 @@ Set up the TUI foundation using Ink (React for terminals) and add the `sync-patt
 
 ### Acceptance Criteria
 
-- [ ] Install Ink, chalk, ora, boxen dependencies
-- [ ] Create `src/tui/` directory structure (components/, renderers/, utils/)
-- [ ] Create `src/cli/commands/explore.ts` with CLI argument parsing
-- [ ] Wire explore command to main CLI (`sync-patterns explore`)
-- [ ] Create basic `src/tui/App.tsx` root component
-- [ ] Support `--entity <name>` and `--api-url <url>` flags
-- [ ] Validate `src/generated/` exists before launching TUI
-- [ ] Clear error message if generated code missing
+- [x] Install Ink, chalk, ora, boxen dependencies
+- [x] Create `src/tui/` directory structure (components/, renderers/, utils/)
+- [x] Create `src/cli/commands/explore.ts` with CLI argument parsing
+- [x] Wire explore command to main CLI (`sync-patterns explore`)
+- [x] Create basic `src/tui/App.tsx` root component
+- [x] Support `--entity <name>` and `--api-url <url>` flags
+- [x] Validate `src/generated/` exists before launching TUI
+- [x] Clear error message if generated code missing
 
 ### Technical Notes
 
