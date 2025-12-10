@@ -57,13 +57,14 @@ package.json                       (add dependencies)
 
 ---
 
-## Issue 2: Terminal Field Renderers
+## [x] Issue 2: Terminal Field Renderers
 
 **Title**: `feat(tui): Terminal field renderers for all 19 UITypes`
 
 **Priority**: P0 (Critical)
 **Estimate**: 3 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -71,9 +72,9 @@ Create terminal-native renderers for all 19 UITypes, adapting the existing front
 
 ### Acceptance Criteria
 
-- [ ] Create renderer registry mapping UIType → terminal output
-- [ ] Reuse `formatMoney()`, `formatDate()`, `formatNumber()` from frontend-patterns
-- [ ] All 19 UITypes render correctly:
+- [x] Create renderer registry mapping UIType → terminal output
+- [x] Reuse `formatMoney()`, `formatDate()`, `formatNumber()` from frontend-patterns
+- [x] All 19 UITypes render correctly:
   - text, password (masked ●●●)
   - number, money (green, formatted), percent
   - date, datetime (gray, localized)
@@ -85,9 +86,9 @@ Create terminal-native renderers for all 19 UITypes, adapting the existing front
   - image, file (filename only)
   - rating (★☆ symbols)
   - color (hex with swatch approximation)
-- [ ] Graceful fallback for unknown types
-- [ ] Terminal capability detection (colors, unicode)
-- [ ] ASCII fallbacks for terminals without unicode
+- [x] Graceful fallback for unknown types
+- [x] Terminal capability detection (colors, unicode)
+- [x] ASCII fallbacks for terminals without unicode
 
 ### Technical Notes
 

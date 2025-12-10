@@ -6,6 +6,7 @@ export default defineConfig([
     entry: {
       index: 'src/index.ts',
       'generators/index': 'src/generators/index.ts',
+      'tui/index': 'src/tui/index.ts',
     },
     format: ['esm'],
     dts: true,
