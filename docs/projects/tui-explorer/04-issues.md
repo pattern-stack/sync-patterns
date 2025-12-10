@@ -194,13 +194,14 @@ src/tui/components/DataTable.tsx   (~200 lines)
 
 ---
 
-## Issue 5: Detail View Component
+## [x] Issue 5: Detail View Component
 
 **Title**: `feat(tui): DetailView component with grouped fields`
 
 **Priority**: P1 (High)
 **Estimate**: 3 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -208,29 +209,29 @@ Create a detail view showing a single record with all fields organized by metada
 
 ### Acceptance Criteria
 
-- [ ] Vertical layout showing all fields (label: value)
-- [ ] Group fields by `ui_group` (identification, financial, sales_process, etc.)
-- [ ] Collapsible sections with group headers
-- [ ] Apply field renderers for proper formatting
-- [ ] Show metadata fields (created_at, updated_at, id) in separate section
-- [ ] Keyboard navigation:
+- [x] Vertical layout showing all fields (label: value)
+- [x] Group fields by `ui_group` (identification, financial, sales_process, etc.)
+- [x] Collapsible sections with group headers
+- [x] Apply field renderers for proper formatting
+- [x] Show metadata fields (created_at, updated_at, id) in separate section
+- [x] Keyboard navigation:
   - ↑/↓: Scroll through fields
   - b or Esc: Back to table
   - e: Edit (future - show "Coming soon")
   - d: Delete (future - show "Coming soon")
-- [ ] Handle null/undefined values gracefully
-- [ ] Scrollable for records with many fields
+- [x] Handle null/undefined values gracefully
+- [x] Scrollable for records with many fields
 
 ### Technical Notes
 
 - Reference: `sales-patterns/application/frontend/src/pages/AdminEditPage.tsx` for grouping logic
-- Use boxen for section borders
-- Group order: identification, financial, sales_process, contact, general, metadata
+- Uses Unicode box drawing characters instead of boxen (not in dependencies)
+- Group order: identification, basic, contact, financial, sales_process, general, metadata
 
-### Files to Create
+### Files Created
 
 ```
-src/tui/components/DetailView.tsx  (~150 lines)
+src/tui/components/DetailView.tsx  (~340 lines)
 ```
 
 ---
