@@ -9,6 +9,8 @@ import { Box, Text, useInput } from 'ink'
 import chalk from 'chalk'
 import type { EntityMetadata, SyncMode } from '../utils/entity-discovery'
 import { discoverEntities } from '../utils/entity-discovery'
+import LoadingView from './LoadingView'
+import ErrorView from './ErrorView'
 
 export interface EntityListProps {
   /** Callback when an entity is selected */
@@ -39,25 +41,31 @@ export function EntityList({ onSelect, onBack }: EntityListProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
 
   // Discover entities on mount
-  useEffect(() => {
-    async function loadEntities() {
-      try {
-        setIsLoading(true)
-        const discovered = await discoverEntities()
-        setEntities(discovered)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error(String(err)))
-      } finally {
-        setIsLoading(false)
-      }
+  const loadEntities = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const discovered = await discoverEntities()
+      setEntities(discovered)
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setIsLoading(false)
     }
+  }
 
+  useEffect(() => {
     loadEntities()
   }, [])
 
   // Handle keyboard input
   useInput((input, key) => {
+    // Allow retry on error
+    if (error && input === 'r') {
+      loadEntities()
+      return
+    }
+
     if (isLoading || entities.length === 0) return
 
     // Up arrow
@@ -86,33 +94,12 @@ export function EntityList({ onSelect, onBack }: EntityListProps) {
 
   // Loading state
   if (isLoading) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Box marginBottom={1}>
-          <Text bold color="cyan">Discovering entities...</Text>
-        </Box>
-        <Box>
-          <Text dimColor>Scanning src/generated/entities/</Text>
-        </Box>
-      </Box>
-    )
+    return <LoadingView message="Discovering entities" />
   }
 
   // Error state
   if (error) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Box marginBottom={1}>
-          <Text bold color="red">Error discovering entities</Text>
-        </Box>
-        <Box marginBottom={1}>
-          <Text color="red">{error.message}</Text>
-        </Box>
-        <Box>
-          <Text dimColor>Press Esc to go back</Text>
-        </Box>
-      </Box>
-    )
+    return <ErrorView error={error} context="discovering entities" showRetry={true} />
   }
 
   // Empty state

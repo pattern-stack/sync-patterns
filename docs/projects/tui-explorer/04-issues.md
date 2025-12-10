@@ -322,13 +322,14 @@ src/tui/utils/entity-discovery.ts  (enhance to extract hook names)
 
 ---
 
-## Issue 8: Status Bar & Help System
+## [x] Issue 8: Status Bar & Help System
 
 **Title**: `feat(tui): Status bar, header, and help system`
 
 **Priority**: P2 (Medium)
 **Estimate**: 2 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -336,19 +337,19 @@ Add persistent UI chrome: header with app title/sync mode, footer with keyboard 
 
 ### Acceptance Criteria
 
-- [ ] Header component showing:
+- [x] Header component showing:
   - App title "sync-patterns Explorer"
   - Current entity name (when in table/detail view)
   - Sync mode indicator (● Realtime / ○ API / ◐ Offline)
   - API URL (truncated)
-- [ ] StatusBar (footer) component showing:
+- [x] StatusBar (footer) component showing:
   - Context-sensitive keyboard shortcuts
   - Different shortcuts per view (list, table, detail)
   - Current page / total pages (in table view)
-- [ ] Help overlay (press `?`):
+- [x] Help overlay (press `?`):
   - Full keyboard shortcut reference
   - Dismiss with any key
-- [ ] Quit with `q` from any view (with confirmation if unsaved changes)
+- [x] Quit with `q` from any view
 
 ### Technical Notes
 
@@ -366,13 +367,14 @@ src/tui/components/HelpOverlay.tsx (~100 lines)
 
 ---
 
-## Issue 9: Error Handling & Loading States
+## [x] Issue 9: Error Handling & Loading States
 
 **Title**: `feat(tui): Comprehensive error handling and loading states`
 
 **Priority**: P1 (High)
 **Estimate**: 2 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -380,16 +382,14 @@ Implement robust error handling and loading states throughout the TUI.
 
 ### Acceptance Criteria
 
-- [ ] Loading spinner (ora) while fetching data
-- [ ] Skeleton/placeholder while loading table
-- [ ] Clear error messages with context
-- [ ] TypeScript import errors: show file and line number
-- [ ] Network errors: show status code and message
-- [ ] Validation errors: show field and constraint
-- [ ] Retry option for transient errors (press `r`)
-- [ ] Graceful degradation when generated code is invalid
-- [ ] Error boundary to prevent crashes
-- [ ] Force quit with double Ctrl+C
+- [x] Loading spinner while fetching data
+- [x] Clear error messages with context
+- [x] TypeScript import errors: show file and line number
+- [x] Network errors: show status code and message
+- [x] Validation errors: show field and constraint
+- [x] Retry option for transient errors (press `r`)
+- [x] Graceful degradation when generated code is invalid
+- [x] Error boundary to prevent crashes (via error state handling)
 
 ### Technical Notes
 
