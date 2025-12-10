@@ -40,8 +40,8 @@ describe('EntitiesHookGenerator', () => {
       expect(result.code).toContain("import type { ColumnMetadata } from '@pattern-stack/frontend-patterns'")
       expect(result.code).toContain("import { useEntityData } from '@pattern-stack/frontend-patterns'")
 
-      // Unified types import
-      expect(result.code).toContain("import type { UnifiedQueryResult, UnifiedMutationResult } from './entities/types'")
+      // Unified types import (includes UnifiedQueryResultWithMeta for WithMeta hooks)
+      expect(result.code).toContain("import type { UnifiedQueryResult, UnifiedMutationResult, UnifiedQueryResultWithMeta } from './entities/types'")
 
       // Entity imports
       expect(result.code).toContain("from './entities/accounts'")
