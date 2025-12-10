@@ -4,12 +4,14 @@
  * Root component for the interactive terminal UI
  */
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import chalk from 'chalk'
 import { useNavigation } from './hooks/useNavigation'
 import { EntityList } from './components/EntityList'
+import Header from './components/Header'
+import StatusBar from './components/StatusBar'
+import HelpOverlay from './components/HelpOverlay'
 
 export interface AppProps {
   entity?: string
@@ -37,11 +39,17 @@ const queryClient = new QueryClient({
 function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProps) {
   const { exit } = useApp()
   const navigation = useNavigation(entity ? 'table' : 'entity-list')
+  const [showHelp, setShowHelp] = useState(false)
 
   // Handle global keyboard input
   useInput((input, key) => {
-    // Quit on 'q' (when at top level) or Ctrl+C
-    if ((input === 'q' && navigation.state.view === 'entity-list') || (key.ctrl && input === 'c')) {
+    // If help is showing, let HelpOverlay handle input
+    if (showHelp) {
+      return
+    }
+
+    // Quit on 'q' from any view or Ctrl+C
+    if (input === 'q' || (key.ctrl && input === 'c')) {
       exit()
     }
 
@@ -49,12 +57,14 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
     if (key.escape) {
       if (navigation.state.view === 'table' || navigation.state.view === 'detail') {
         navigation.goBack()
+      } else if (navigation.state.view === 'entity-list') {
+        exit()
       }
     }
 
     // Help on '?'
     if (input === '?') {
-      // Show help (TODO: implement help overlay in Issue 8)
+      setShowHelp(true)
     }
   })
 
@@ -67,27 +77,24 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
     exit()
   }
 
-  // Determine sync mode indicator
-  const syncModeIndicator = mode === 'optimistic'
-    ? chalk.green('● Optimistic')
-    : mode === 'confirmed'
-    ? chalk.yellow('○ Confirmed')
-    : chalk.cyan('◐ Auto')
+  // Show help overlay if active
+  if (showHelp) {
+    return (
+      <Box flexDirection="column" padding={1} justifyContent="center" alignItems="center">
+        <HelpOverlay onClose={() => setShowHelp(false)} />
+      </Box>
+    )
+  }
 
   return (
     <Box flexDirection="column" padding={1}>
       {/* Header */}
-      <Box borderStyle="round" borderColor="cyan" padding={1} marginBottom={1}>
-        <Box flexDirection="column" width="100%">
-          <Box justifyContent="space-between">
-            <Text bold color="cyan">sync-patterns Explorer</Text>
-            <Text>{syncModeIndicator}</Text>
-          </Box>
-          <Box marginTop={1}>
-            <Text dimColor>API: {apiUrl}</Text>
-          </Box>
-        </Box>
-      </Box>
+      <Header
+        entityName={navigation.state.selectedEntity}
+        mode={mode}
+        apiUrl={apiUrl}
+        view={navigation.state.view}
+      />
 
       {/* Main Content */}
       <Box flexDirection="column" flexGrow={1}>
@@ -141,23 +148,12 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
       </Box>
 
       {/* Footer / Status Bar */}
-      <Box borderStyle="single" borderColor="gray" paddingX={1}>
-        {navigation.state.view === 'entity-list' && (
-          <Text dimColor>
-            ↑/↓: Navigate  •  Enter: Select  •  q: Quit
-          </Text>
-        )}
-        {navigation.state.view === 'table' && (
-          <Text dimColor>
-            Esc: Back to entities  •  q: Quit
-          </Text>
-        )}
-        {navigation.state.view === 'detail' && (
-          <Text dimColor>
-            Esc: Back to table  •  q: Quit
-          </Text>
-        )}
-      </Box>
+      <StatusBar
+        view={navigation.state.view}
+        currentPage={undefined}
+        totalPages={undefined}
+        isLoading={false}
+      />
     </Box>
   )
 }

@@ -14,6 +14,8 @@ import { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import chalk from 'chalk'
 import { renderField, type UIType, type FieldFormat } from '../renderers/index.js'
+import LoadingView from './LoadingView'
+import ErrorView from './ErrorView'
 
 /**
  * Column definition
@@ -185,26 +187,12 @@ export default function DataTable({
 
   // Loading state
   if (loading) {
-    return (
-      <Box flexDirection="column" padding={2}>
-        <Text color="cyan">Loading {entityName}...</Text>
-      </Box>
-    )
+    return <LoadingView message="Loading" entityName={entityName} />
   }
 
   // Error state
   if (error) {
-    return (
-      <Box flexDirection="column" padding={2}>
-        <Box marginBottom={1}>
-          <Text color="red" bold>Error loading {entityName}</Text>
-        </Box>
-        <Text color="red">{error.message}</Text>
-        <Box marginTop={1}>
-          <Text dimColor>Press Esc to go back</Text>
-        </Box>
-      </Box>
-    )
+    return <ErrorView error={error} context="loading records" entityName={entityName} showRetry={false} />
   }
 
   // Empty state
