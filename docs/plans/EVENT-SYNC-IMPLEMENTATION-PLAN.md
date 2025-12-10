@@ -1,8 +1,9 @@
 # Event-Sourced Sync Architecture - Implementation Plan
 
-> **Status**: Planning
+> **Status**: Planning (Revised)
 > **Author**: Claude + Dug
 > **Date**: 2025-12-06
+> **Revised**: 2025-12-06
 > **Spec**: [SYNC-008 Event-Sourced Sync Architecture](../specs/SYNC-008-event-sourced-sync-architecture.md)
 
 ## Executive Summary
@@ -12,44 +13,74 @@ This implementation plan consolidates the event-sourced sync architecture into a
 ### What We're Building
 
 A single, unified sync paradigm that:
-- Records all mutations as immutable events in IndexedDB
-- Derives current state by materializing event logs
+- Records all mutations as immutable events in **PGlite** (Postgres WASM)
+- Derives current state by materializing event logs (with snapshot optimization)
 - Syncs events to server in background (doesn't block UI)
 - Broadcasts changes to other clients via pluggable notification backends
 - Works completely offline with proper event ordering on reconnect
+- Uses **Hybrid Logical Clocks (HLC)** for correct distributed ordering
 
 ### Key Architectural Decisions
 
 1. **Pattern-driven**: Configuration in Pattern class drives all code generation
-2. **Extension-based**: BasePattern delegates to internal extensions (no mixins)
+2. **PGlite + Type-safe queries**: Postgres WASM with generated typed query functions (not raw SQL, not full ORM)
 3. **Subsystem pattern**: Notification subsystem follows cache/storage pattern
 4. **Auto-discovery**: Framework discovers models with `sync_mode="events"` and generates endpoints
-5. **Local-first**: Events persist in IndexedDB before network operation
+5. **Local-first**: Events persist in PGlite before network operation
+6. **Snapshot compaction**: Configurable checkpoints prevent unbounded event replay
+7. **HLC timestamps**: Hybrid Logical Clocks for causally-correct ordering
 
 ### Benefits Over Current System
 
 | Current (3 modes) | Event-Sourced (1 paradigm) |
 |-------------------|----------------------------|
-| TanStack Query (api) | Dexie event store |
-| TanStack DB (realtime) | Same Dexie store |
-| RxDB (offline) | Same Dexie store |
+| TanStack Query (api) | PGlite event store |
+| TanStack DB (realtime) | Same PGlite store |
+| RxDB (offline) | Same PGlite store |
 | Different code paths | Single code path |
 | No offline state persistence | Full state persists |
 | No audit trail | Complete event history |
 | Complex generator | Simpler generator |
+| Wall-clock timestamps | HLC (causally correct) |
+
+### Why PGlite Over Dexie
+
+Per ADR-005 (Local Database Selection), we use PGlite because:
+- **Same SQL as backend**: Postgres everywhere, no impedance mismatch
+- **Real SQL features**: CTEs, window functions, JSON operators
+- **Type-safe generation**: Generate typed query functions from backend schemas
+- **Smaller than alternatives**: ~1.4MB vs ~3MB for SQLite WASM
+
+We generate a **typed query layer** (not raw SQL strings) that provides:
+- Type-safe parameters and results (Zod validation)
+- Generated from OpenAPI/backend schemas
+- Composable query builders for complex operations
+- Migration support
 
 ## Prerequisites
 
-This implementation assumes the BasePattern extension architecture is available. The extension system allows BasePattern to delegate specific functionality (field processing, change tracking, sync events) to modular extensions that can be enabled/configured per pattern.
+### Backend Sync Methods (Pragmatic Approach)
 
-**What we need from the extension system**:
-- `PatternExtension` base class with `setup_class()` lifecycle hook
-- Extension registration via `BasePattern.__init_subclass__`
-- Ability to add class methods and event listeners from extensions
+Rather than waiting for a full extension architecture refactor, we'll add sync methods directly to BasePattern via `__init_subclass__`:
 
-The `SyncExtension` will plug into this architecture to provide event emission and notification capabilities without modifying BasePattern core logic.
+```python
+# In BasePattern.__init_subclass__
+if hasattr(cls, "Pattern"):
+    sync_mode = getattr(cls.Pattern, "sync_mode", "api")
+    if sync_mode == "events":
+        # Add sync methods directly
+        cls.emit_sync_event = _create_emit_sync_event(cls)
+        cls.get_event_history = _create_get_event_history(cls)
+```
 
-See `/Users/dug/pattern-stack-workspace/backend-patterns/docs/plans/BASEPATTERN-EXTENSION-REFACTOR-OUTLINE.md` for the planned extension architecture.
+This is a pragmatic first step. A full extension architecture can be added later without changing the public API.
+
+### Required ADRs (To Be Written)
+
+Before implementation, document these decisions:
+- **ADR-008**: Why event-sourcing over 3-mode system
+- **ADR-009**: Conflict resolution strategy (HLC vs wall-clock)
+- **ADR-010**: Snapshot compaction strategy
 
 ## Phase 1: Notification Subsystem
 
@@ -890,7 +921,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 ## Phase 4: Frontend Generation
 
-**Goal**: Generate TypeScript event store, materializers, sync engine, and React hooks.
+**Goal**: Generate TypeScript event store (PGlite), type-safe queries, materializers with snapshot support, sync engine with leader election, and React hooks.
 
 ### Dependencies
 - Phase 3 (Backend endpoints available)
@@ -908,6 +939,13 @@ export interface SyncConfig {
   mode: 'api' | 'events'
   events?: string[]
   notification?: string
+  snapshot?: SnapshotConfig  // NEW: Snapshot configuration
+}
+
+export interface SnapshotConfig {
+  enabled: boolean
+  eventsPerSnapshot: number  // Create snapshot every N events (default: 50)
+  maxEventsBeforeSnapshot: number  // Force snapshot if events exceed (default: 100)
 }
 
 export interface EntitySpec {
@@ -931,6 +969,11 @@ export function parseOpenAPISpec(spec: any): EntitySpec[] {
         mode: xSync.mode || 'api',
         events: xSync.events || [],
         notification: xSync.notification || 'polling',
+        snapshot: {
+          enabled: xSync.snapshot?.enabled ?? true,
+          eventsPerSnapshot: xSync.snapshot?.events_per_snapshot ?? 50,
+          maxEventsBeforeSnapshot: xSync.snapshot?.max_events ?? 100,
+        },
       },
       endpoints: parseEndpoints(pathItem),
     })
@@ -940,7 +983,9 @@ export function parseOpenAPISpec(spec: any): EntitySpec[] {
 }
 ```
 
-#### 4.2 Generate Event Store
+#### 4.2 Generate PGlite Event Store with Type-Safe Queries
+
+Using PGlite with generated typed query functions (not raw SQL, not full ORM):
 
 ```typescript
 // sync-patterns/src/generators/event-store-generator.ts
@@ -948,63 +993,279 @@ export function parseOpenAPISpec(spec: any): EntitySpec[] {
 export function generateEventStore(entities: EntitySpec[]): GeneratedFile[] {
   return [
     {
+      path: 'store/db.ts',
+      content: `
+import { PGlite } from '@electric-sql/pglite'
+import { z } from 'zod'
+
+// Initialize PGlite with IndexedDB persistence
+export const db = new PGlite('idb://pattern-stack-events')
+
+// Initialize schema
+export async function initEventStore(): Promise<void> {
+  await db.exec(\`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      hlc_timestamp TEXT NOT NULL,  -- Hybrid Logical Clock
+      wall_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      user_id TEXT,
+      synced BOOLEAN DEFAULT FALSE,
+      server_id TEXT,
+      idempotency_key TEXT UNIQUE NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_events_entity
+      ON events(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_events_unsynced
+      ON events(synced) WHERE synced = FALSE;
+    CREATE INDEX IF NOT EXISTS idx_events_hlc
+      ON events(entity_type, entity_id, hlc_timestamp);
+
+    -- Snapshots table for materialization optimization
+    CREATE TABLE IF NOT EXISTS snapshots (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      state JSONB NOT NULL,
+      last_event_id TEXT NOT NULL,
+      last_hlc TEXT NOT NULL,
+      event_count INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(entity_type, entity_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_snapshots_entity
+      ON snapshots(entity_type, entity_id);
+  \`)
+}
+      `
+    },
+    {
       path: 'store/eventStore.ts',
       content: `
-import Dexie from 'dexie'
+import { db } from './db'
+import { z } from 'zod'
+import { HLC } from './hlc'
 
-export interface LocalEvent {
-  id: string
-  event_type: string
-  entity_type: string
-  entity_id: string
-  payload: Record<string, any>
-  timestamp: number
-  user_id: string | null
-  synced: boolean
-  server_id: string | null
-  idempotency_key: string
+// ============================================================
+// TYPE-SAFE QUERY LAYER (generated from OpenAPI schemas)
+// ============================================================
+
+// Event schema with Zod validation
+export const LocalEventSchema = z.object({
+  id: z.string().uuid(),
+  event_type: z.string(),
+  entity_type: z.string(),
+  entity_id: z.string().uuid(),
+  payload: z.record(z.unknown()),
+  hlc_timestamp: z.string(),
+  wall_timestamp: z.string(),
+  user_id: z.string().uuid().nullable(),
+  synced: z.boolean(),
+  server_id: z.string().nullable(),
+  idempotency_key: z.string(),
+})
+
+export type LocalEvent = z.infer<typeof LocalEventSchema>
+
+// Snapshot schema
+export const SnapshotSchema = z.object({
+  id: z.string().uuid(),
+  entity_type: z.string(),
+  entity_id: z.string().uuid(),
+  state: z.record(z.unknown()),
+  last_event_id: z.string(),
+  last_hlc: z.string(),
+  event_count: z.number(),
+  created_at: z.string(),
+})
+
+export type Snapshot = z.infer<typeof SnapshotSchema>
+
+// ============================================================
+// TYPED QUERY FUNCTIONS (compile-time safe, runtime validated)
+// ============================================================
+
+export const eventQueries = {
+  /** Insert a new event */
+  async insert(event: Omit<LocalEvent, 'wall_timestamp'>): Promise<LocalEvent> {
+    const result = await db.query<LocalEvent>(
+      \`INSERT INTO events (id, event_type, entity_type, entity_id, payload,
+         hlc_timestamp, user_id, synced, server_id, idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *\`,
+      [event.id, event.event_type, event.entity_type, event.entity_id,
+       JSON.stringify(event.payload), event.hlc_timestamp, event.user_id,
+       event.synced, event.server_id, event.idempotency_key]
+    )
+    return LocalEventSchema.parse(result.rows[0])
+  },
+
+  /** Get events for an entity, starting from optional snapshot */
+  async getForEntity(
+    entityType: string,
+    entityId: string,
+    afterHlc?: string
+  ): Promise<LocalEvent[]> {
+    const query = afterHlc
+      ? \`SELECT * FROM events
+         WHERE entity_type = $1 AND entity_id = $2 AND hlc_timestamp > $3
+         ORDER BY hlc_timestamp\`
+      : \`SELECT * FROM events
+         WHERE entity_type = $1 AND entity_id = $2
+         ORDER BY hlc_timestamp\`
+
+    const params = afterHlc
+      ? [entityType, entityId, afterHlc]
+      : [entityType, entityId]
+
+    const result = await db.query<LocalEvent>(query, params)
+    return result.rows.map(row => LocalEventSchema.parse(row))
+  },
+
+  /** Get unsynced events for batch upload */
+  async getUnsynced(limit = 100): Promise<LocalEvent[]> {
+    const result = await db.query<LocalEvent>(
+      \`SELECT * FROM events WHERE synced = FALSE
+       ORDER BY hlc_timestamp LIMIT $1\`,
+      [limit]
+    )
+    return result.rows.map(row => LocalEventSchema.parse(row))
+  },
+
+  /** Mark events as synced */
+  async markSynced(eventIds: string[]): Promise<void> {
+    await db.query(
+      \`UPDATE events SET synced = TRUE WHERE id = ANY($1)\`,
+      [eventIds]
+    )
+  },
+
+  /** Count events for an entity (for snapshot decision) */
+  async countForEntity(entityType: string, entityId: string): Promise<number> {
+    const result = await db.query<{ count: string }>(
+      \`SELECT COUNT(*) as count FROM events
+       WHERE entity_type = $1 AND entity_id = $2\`,
+      [entityType, entityId]
+    )
+    return parseInt(result.rows[0].count, 10)
+  },
 }
 
-class EventStoreDB extends Dexie {
-  events!: Dexie.Table<LocalEvent, string>
+export const snapshotQueries = {
+  /** Get snapshot for an entity */
+  async get(entityType: string, entityId: string): Promise<Snapshot | null> {
+    const result = await db.query<Snapshot>(
+      \`SELECT * FROM snapshots WHERE entity_type = $1 AND entity_id = $2\`,
+      [entityType, entityId]
+    )
+    return result.rows[0] ? SnapshotSchema.parse(result.rows[0]) : null
+  },
 
-  constructor() {
-    super('pattern-stack-events')
+  /** Upsert snapshot */
+  async upsert(snapshot: Omit<Snapshot, 'created_at'>): Promise<Snapshot> {
+    const result = await db.query<Snapshot>(
+      \`INSERT INTO snapshots (id, entity_type, entity_id, state, last_event_id,
+         last_hlc, event_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (entity_type, entity_id)
+       DO UPDATE SET state = $4, last_event_id = $5, last_hlc = $6,
+         event_count = $7, created_at = NOW()
+       RETURNING *\`,
+      [snapshot.id, snapshot.entity_type, snapshot.entity_id,
+       JSON.stringify(snapshot.state), snapshot.last_event_id,
+       snapshot.last_hlc, snapshot.event_count]
+    )
+    return SnapshotSchema.parse(result.rows[0])
+  },
 
-    this.version(1).stores({
-      events: [
-        'id',
-        'entity_type',
-        'entity_id',
-        'timestamp',
-        'synced',
-        '[entity_type+entity_id]',
-        '[entity_type+timestamp]',
-        'idempotency_key'
-      ].join(', ')
-    })
+  /** Delete old events that are covered by snapshot */
+  async pruneEvents(entityType: string, entityId: string, beforeHlc: string): Promise<number> {
+    const result = await db.query<{ count: string }>(
+      \`WITH deleted AS (
+         DELETE FROM events
+         WHERE entity_type = $1 AND entity_id = $2
+           AND hlc_timestamp < $3 AND synced = TRUE
+         RETURNING 1
+       )
+       SELECT COUNT(*) as count FROM deleted\`,
+      [entityType, entityId, beforeHlc]
+    )
+    return parseInt(result.rows[0].count, 10)
+  },
+}
+      `
+    },
+    {
+      path: 'store/hlc.ts',
+      content: `
+/**
+ * Hybrid Logical Clock implementation
+ * Provides causally-correct timestamps without requiring synchronized clocks
+ */
+export class HLC {
+  private counter: number = 0
+  private lastTime: number = 0
+
+  /** Generate next HLC timestamp */
+  now(): string {
+    const physicalTime = Date.now()
+
+    if (physicalTime > this.lastTime) {
+      this.lastTime = physicalTime
+      this.counter = 0
+    } else {
+      this.counter++
+    }
+
+    // Format: {physical_time}.{counter}.{node_id}
+    // Lexicographically sortable
+    return \`\${this.lastTime.toString().padStart(15, '0')}.\${
+      this.counter.toString().padStart(5, '0')
+    }.\${this.nodeId}\`
   }
+
+  /** Update clock when receiving remote event */
+  receive(remoteHlc: string): void {
+    const [remoteTime, remoteCounter] = this.parse(remoteHlc)
+    const physicalTime = Date.now()
+
+    if (remoteTime > this.lastTime && remoteTime > physicalTime) {
+      this.lastTime = remoteTime
+      this.counter = remoteCounter + 1
+    } else if (remoteTime === this.lastTime) {
+      this.counter = Math.max(this.counter, remoteCounter) + 1
+    } else {
+      // Local time is ahead, just increment
+      if (physicalTime > this.lastTime) {
+        this.lastTime = physicalTime
+        this.counter = 0
+      } else {
+        this.counter++
+      }
+    }
+  }
+
+  private parse(hlc: string): [number, number] {
+    const [time, counter] = hlc.split('.')
+    return [parseInt(time, 10), parseInt(counter, 10)]
+  }
+
+  private nodeId = crypto.randomUUID().slice(0, 8)
 }
 
-export const eventStore = new EventStoreDB()
-
-// Core operations...
-export async function recordEvent(/* ... */): Promise<LocalEvent> {
-  // Implementation
-}
-
-export async function getEventsForEntity(/* ... */): Promise<LocalEvent[]> {
-  // Implementation
-}
+export const hlc = new HLC()
       `
     }
   ]
 }
 ```
 
-#### 4.3 Generate Materializers
-
-For each entity with `sync_mode='events'`:
+#### 4.3 Generate Materializers with Snapshot Support
 
 ```typescript
 // sync-patterns/src/generators/materializer-generator.ts
@@ -1021,42 +1282,150 @@ export function generateMaterializers(entities: EntitySpec[]): GeneratedFile[] {
     })
   }
 
+  // Generate shared materializer utilities
+  files.push({
+    path: 'materializers/utils.ts',
+    content: generateMaterializerUtils()
+  })
+
   return files
 }
 
+function generateMaterializerUtils(): string {
+  return `
+import { eventQueries, snapshotQueries, LocalEvent, Snapshot } from '../store/eventStore'
+
+export interface MaterializeOptions {
+  /** Create snapshot after this many events */
+  snapshotThreshold: number
+  /** Force snapshot if events exceed this count */
+  forceSnapshotAt: number
+}
+
+export const DEFAULT_MATERIALIZE_OPTIONS: MaterializeOptions = {
+  snapshotThreshold: 50,
+  forceSnapshotAt: 100,
+}
+
+/**
+ * Base materializer that handles snapshot logic
+ */
+export async function materializeWithSnapshots<T>(
+  entityType: string,
+  entityId: string,
+  reducer: (state: T | null, event: LocalEvent) => T | null,
+  initialState: T | null,
+  options: MaterializeOptions = DEFAULT_MATERIALIZE_OPTIONS
+): Promise<T | null> {
+  // 1. Try to load snapshot
+  const snapshot = await snapshotQueries.get(entityType, entityId)
+
+  let state: T | null = snapshot
+    ? (snapshot.state as T)
+    : initialState
+
+  // 2. Get events since snapshot (or all events if no snapshot)
+  const events = await eventQueries.getForEntity(
+    entityType,
+    entityId,
+    snapshot?.last_hlc
+  )
+
+  if (events.length === 0 && !snapshot) {
+    return null
+  }
+
+  // 3. Apply events to state
+  for (const event of events) {
+    state = reducer(state, event)
+  }
+
+  // 4. Maybe create new snapshot
+  const totalEvents = (snapshot?.event_count ?? 0) + events.length
+  const shouldSnapshot =
+    events.length >= options.snapshotThreshold ||
+    totalEvents >= options.forceSnapshotAt
+
+  if (shouldSnapshot && state !== null && events.length > 0) {
+    const lastEvent = events[events.length - 1]
+    await snapshotQueries.upsert({
+      id: crypto.randomUUID(),
+      entity_type: entityType,
+      entity_id: entityId,
+      state: state as Record<string, unknown>,
+      last_event_id: lastEvent.id,
+      last_hlc: lastEvent.hlc_timestamp,
+      event_count: totalEvents,
+    })
+
+    // Optionally prune old synced events
+    if (snapshot) {
+      await snapshotQueries.pruneEvents(entityType, entityId, snapshot.last_hlc)
+    }
+  }
+
+  return state
+}
+  `
+}
+
 function generateMaterializerCode(entity: EntitySpec): string {
+  const snapshotConfig = entity.sync.snapshot ?? {
+    enabled: true,
+    eventsPerSnapshot: 50,
+    maxEventsBeforeSnapshot: 100,
+  }
+
   const eventHandlers = entity.sync.events?.map(eventName => `
     case '${entity.name}.${eventName}':
-      return handle${capitalize(eventName)}(${entity.name.toLowerCase()}, event)
+      return handle${capitalize(eventName)}(state, event)
   `).join('\n')
 
   return `
-import { LocalEvent, getEventsForEntity } from '../store/eventStore'
-import { ${entity.name} } from '../schemas/${entity.name}.schema'
+import { LocalEvent } from '../store/eventStore'
+import { materializeWithSnapshots, MaterializeOptions } from './utils'
+import { ${entity.name}Schema, ${entity.name} } from '../schemas/${entity.name}.schema'
 
-export async function materialize${entity.name}(
-  id: string
-): Promise<${entity.name} | null> {
-  const events = await getEventsForEntity('${entity.name}', id)
-
-  if (events.length === 0) return null
-
-  return events.reduce<${entity.name} | null>((state, event) => {
-    switch (event.event_type) {
-      ${eventHandlers}
-      default:
-        return state
-    }
-  }, null)
+// Snapshot configuration (from backend Pattern config)
+const SNAPSHOT_OPTIONS: MaterializeOptions = {
+  snapshotThreshold: ${snapshotConfig.eventsPerSnapshot},
+  forceSnapshotAt: ${snapshotConfig.maxEventsBeforeSnapshot},
 }
 
-// Event handlers...
+/**
+ * Materialize ${entity.name} from event log with automatic snapshot optimization
+ */
+export async function materialize${entity.name}(id: string): Promise<${entity.name} | null> {
+  return materializeWithSnapshots<${entity.name}>(
+    '${entity.name}',
+    id,
+    ${entity.name.toLowerCase()}Reducer,
+    null,
+    SNAPSHOT_OPTIONS
+  )
+}
+
+/**
+ * Pure reducer: (state, event) => newState
+ */
+function ${entity.name.toLowerCase()}Reducer(
+  state: ${entity.name} | null,
+  event: LocalEvent
+): ${entity.name} | null {
+  switch (event.event_type) {
+    ${eventHandlers}
+    default:
+      return state
+  }
+}
+
+// Event handlers (generated from sync_events)
 ${generateEventHandlers(entity)}
   `
 }
 ```
 
-#### 4.4 Generate Sync Engine
+#### 4.4 Generate Sync Engine with Leader Election
 
 ```typescript
 // sync-patterns/src/generators/sync-engine-generator.ts
@@ -1065,38 +1434,198 @@ export function generateSyncEngine(): GeneratedFile {
   return {
     path: 'store/syncEngine.ts',
     content: `
-import { getUnsyncedEvents, markEventsSynced } from './eventStore'
+import { eventQueries } from './eventStore'
 import { apiClient } from '../client'
+import { hlc } from './hlc'
+
+/**
+ * Leader election using BroadcastChannel + Web Locks API
+ * Only one tab syncs at a time to prevent duplicate API calls
+ */
+class LeaderElection {
+  private channel: BroadcastChannel
+  private isLeader = false
+  private lockPromise: Promise<void> | null = null
+
+  constructor(private name: string) {
+    this.channel = new BroadcastChannel(\`sync-leader-\${name}\`)
+  }
+
+  async acquireLeadership(): Promise<boolean> {
+    // Use Web Locks API for cross-tab coordination
+    if (!navigator.locks) {
+      // Fallback: assume leader if no Web Locks support
+      this.isLeader = true
+      return true
+    }
+
+    try {
+      // Try to acquire lock without waiting
+      const result = await navigator.locks.request(
+        \`sync-leader-\${this.name}\`,
+        { ifAvailable: true },
+        async (lock) => {
+          if (lock) {
+            this.isLeader = true
+            // Hold lock until page unloads
+            return new Promise(() => {}) // Never resolves
+          }
+          return false
+        }
+      )
+      return this.isLeader
+    } catch {
+      return false
+    }
+  }
+
+  get amLeader(): boolean {
+    return this.isLeader
+  }
+}
 
 class SyncEngine {
   private syncing = false
   private syncTimeout: number | null = null
+  private leader = new LeaderElection('pattern-stack')
+  private retryDelay = 1000
+  private maxRetryDelay = 30000
+  private onRejection?: (event: any, reason: string) => void
+
+  async initialize(): Promise<void> {
+    await this.leader.acquireLeadership()
+
+    // Listen for online status
+    window.addEventListener('online', () => this.scheduleSync(0))
+    window.addEventListener('offline', () => this.cancelSync())
+
+    // Initial sync
+    if (navigator.onLine) {
+      this.scheduleSync(100)
+    }
+  }
+
+  /** Register handler for rejected events */
+  onEventRejected(handler: (event: any, reason: string) => void): void {
+    this.onRejection = handler
+  }
+
+  scheduleSync(delay = 100): void {
+    if (!this.leader.amLeader) return
+
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout)
+    }
+    this.syncTimeout = window.setTimeout(() => this.sync(), delay)
+  }
+
+  cancelSync(): void {
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout)
+      this.syncTimeout = null
+    }
+  }
 
   async sync(): Promise<void> {
-    if (this.syncing || !navigator.onLine) return
+    if (this.syncing || !navigator.onLine || !this.leader.amLeader) {
+      return
+    }
 
     this.syncing = true
 
     try {
-      const unsynced = await getUnsyncedEvents()
-      if (unsynced.length === 0) return
+      const unsynced = await eventQueries.getUnsynced(50)
 
-      const response = await apiClient.postEventsBatch({
-        events: unsynced
-      })
-
-      if (response.accepted.length > 0) {
-        await markEventsSynced(response.accepted)
+      if (unsynced.length === 0) {
+        this.retryDelay = 1000
+        return
       }
 
-      // Handle rejected events...
+      const response = await apiClient.postEventsBatch({
+        events: unsynced.map(e => ({
+          id: e.id,
+          event_type: e.event_type,
+          entity_type: e.entity_type,
+          entity_id: e.entity_id,
+          payload: e.payload,
+          timestamp: e.hlc_timestamp,
+          user_id: e.user_id,
+          idempotency_key: e.idempotency_key,
+        }))
+      })
+
+      // Mark accepted events as synced
+      if (response.accepted.length > 0) {
+        await eventQueries.markSynced(response.accepted)
+      }
+
+      // Handle rejected events
+      if (response.rejected.length > 0) {
+        for (const rejection of response.rejected) {
+          const event = unsynced.find(e => e.id === rejection.id)
+          if (event && this.onRejection) {
+            this.onRejection(event, rejection.reason)
+          }
+        }
+      }
+
+      // Reset retry delay on success
+      this.retryDelay = 1000
+
+      // If there were more events, schedule another sync
+      if (unsynced.length >= 50) {
+        this.scheduleSync(100)
+      }
+
+    } catch (error) {
+      console.error('[SyncEngine] Sync failed:', error)
+
+      // Exponential backoff
+      this.retryDelay = Math.min(this.retryDelay * 2, this.maxRetryDelay)
+      this.scheduleSync(this.retryDelay)
+
     } finally {
       this.syncing = false
     }
   }
 
-  scheduleSync(delay = 100): void {
-    // Implementation...
+  /** Receive events from server (via WebSocket/Electric/polling) */
+  async receiveEvents(events: Array<{
+    id: string
+    event_type: string
+    entity_type: string
+    entity_id: string
+    payload: Record<string, unknown>
+    timestamp: string
+    user_id: string | null
+    idempotency_key: string
+  }>): Promise<void> {
+    for (const event of events) {
+      // Update our HLC from remote timestamp
+      hlc.receive(event.timestamp)
+
+      // Check if we already have this event
+      const existing = await eventQueries.getByIdempotencyKey?.(event.idempotency_key)
+
+      if (existing) {
+        // Update with server confirmation
+        await eventQueries.markSynced([existing.id])
+      } else {
+        // New event from another client
+        await eventQueries.insert({
+          id: crypto.randomUUID(),
+          event_type: event.event_type,
+          entity_type: event.entity_type,
+          entity_id: event.entity_id,
+          payload: event.payload,
+          hlc_timestamp: event.timestamp,
+          user_id: event.user_id,
+          synced: true,
+          server_id: event.id,
+          idempotency_key: event.idempotency_key,
+        })
+      }
+    }
   }
 }
 
@@ -1123,7 +1652,70 @@ export function generateHooks(entities: EntitySpec[]): GeneratedFile[] {
     })
   }
 
+  // Generate sync status hook
+  files.push({
+    path: 'hooks/useSyncStatus.ts',
+    content: generateSyncStatusHook()
+  })
+
   return files
+}
+
+function generateSyncStatusHook(): string {
+  return `
+import { useState, useEffect } from 'react'
+import { eventQueries } from '../store/eventStore'
+import { syncEngine } from '../store/syncEngine'
+
+export interface SyncStatus {
+  isOnline: boolean
+  pendingCount: number
+  lastSyncedAt: Date | null
+  rejections: Array<{ event: any; reason: string }>
+}
+
+export function useSyncStatus(): SyncStatus {
+  const [status, setStatus] = useState<SyncStatus>({
+    isOnline: navigator.onLine,
+    pendingCount: 0,
+    lastSyncedAt: null,
+    rejections: [],
+  })
+
+  useEffect(() => {
+    const updatePending = async () => {
+      const unsynced = await eventQueries.getUnsynced(1000)
+      setStatus(s => ({ ...s, pendingCount: unsynced.length }))
+    }
+
+    // Listen for rejections
+    syncEngine.onEventRejected((event, reason) => {
+      setStatus(s => ({
+        ...s,
+        rejections: [...s.rejections, { event, reason }],
+      }))
+    })
+
+    // Poll pending count
+    const interval = setInterval(updatePending, 1000)
+    updatePending()
+
+    // Online/offline
+    const handleOnline = () => setStatus(s => ({ ...s, isOnline: true }))
+    const handleOffline = () => setStatus(s => ({ ...s, isOnline: false }))
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  return status
+}
+  `
 }
 
 function generateHookCode(entity: EntitySpec): string {
@@ -1131,37 +1723,70 @@ function generateHookCode(entity: EntitySpec): string {
   const ${eventName} = useCallback(async (
     ${generateEventParams(entity, eventName)}
   ) => {
-    await recordEvent({
+    const event = await recordEvent({
       event_type: '${entity.name}.${eventName}',
       entity_type: '${entity.name}',
       entity_id: id,
       payload: ${generateEventPayload(entity, eventName)},
       user_id: getCurrentUserId(),
     })
-  }, [])
+
+    // Trigger re-materialization
+    invalidate()
+
+    return event
+  }, [id, invalidate])
   `).join('\n')
 
   return `
 import { useState, useEffect, useCallback } from 'react'
-import { recordEvent, eventStore } from '../store/eventStore'
+import { eventQueries } from '../store/eventStore'
+import { hlc } from '../store/hlc'
+import { syncEngine } from '../store/syncEngine'
 import { materialize${entity.name} } from '../materializers/${entity.name}'
+import { ${entity.name}Schema, ${entity.name} } from '../schemas/${entity.name}.schema'
+
+async function recordEvent(params: {
+  event_type: string
+  entity_type: string
+  entity_id: string
+  payload: Record<string, unknown>
+  user_id: string | null
+}) {
+  const event = await eventQueries.insert({
+    id: crypto.randomUUID(),
+    ...params,
+    hlc_timestamp: hlc.now(),
+    synced: false,
+    server_id: null,
+    idempotency_key: crypto.randomUUID(),
+  })
+
+  syncEngine.scheduleSync()
+  return event
+}
 
 export function use${entity.name}(id: string) {
   const [data, setData] = useState<${entity.name} | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [version, setVersion] = useState(0)
+
+  const invalidate = useCallback(() => setVersion(v => v + 1), [])
 
   useEffect(() => {
+    setIsLoading(true)
     materialize${entity.name}(id)
       .then(setData)
       .finally(() => setIsLoading(false))
+  }, [id, version])
 
-    // Subscribe to changes...
-  }, [id])
-
-  return { data, isLoading }
+  return { data, isLoading, invalidate }
 }
 
-export function use${entity.name}Mutations() {
+export function use${entity.name}Mutations(id: string) {
+  const [, setVersion] = useState(0)
+  const invalidate = useCallback(() => setVersion(v => v + 1), [])
+
   ${mutations}
 
   return {
@@ -1179,14 +1804,58 @@ src/generated/
 ├── events/
 │   └── {entity}.events.ts        # Event type definitions
 ├── store/
-│   ├── eventStore.ts             # Dexie database
-│   └── syncEngine.ts             # Background sync
+│   ├── db.ts                     # PGlite initialization
+│   ├── eventStore.ts             # Typed query functions
+│   ├── hlc.ts                    # Hybrid Logical Clock
+│   └── syncEngine.ts             # Background sync + leader election
 ├── materializers/
-│   └── {entity}.ts               # Event → State
+│   ├── utils.ts                  # Snapshot utilities
+│   └── {entity}.ts               # Entity materializer with snapshots
 ├── hooks/
+│   ├── useSyncStatus.ts          # Sync status + rejections
 │   └── use{Entity}.ts            # React hooks
 └── client/
     └── methods.ts                # API client (includes event endpoints)
+```
+
+### Snapshot Configuration
+
+Snapshot behavior is configured per-entity in the backend Pattern class and flows through to frontend:
+
+```python
+# Backend: sales-patterns/app/features/orders/models.py
+class Order(EventPattern):
+    class Pattern:
+        entity = "order"
+        sync_mode = "events"
+        sync_events = ["created", "item_added", "item_removed", "state_changed"]
+
+        # Snapshot configuration (abstracted)
+        sync_snapshot = {
+            "enabled": True,
+            "events_per_snapshot": 50,   # Create snapshot every 50 events
+            "max_events": 100,            # Force snapshot at 100 events
+        }
+```
+
+```yaml
+# OpenAPI output
+/orders:
+  x-sync:
+    mode: events
+    events: [created, item_added, item_removed, state_changed]
+    snapshot:
+      enabled: true
+      events_per_snapshot: 50
+      max_events: 100
+```
+
+```typescript
+// Generated frontend uses this config
+const SNAPSHOT_OPTIONS: MaterializeOptions = {
+  snapshotThreshold: 50,
+  forceSnapshotAt: 100,
+}
 ```
 
 ## Phase 5: Integration & Testing
@@ -1306,16 +1975,19 @@ backend-patterns/
 sync-patterns/
 ├── src/
 │   ├── parsers/
-│   │   └── openapi-parser.ts                # Modified: Parse x-sync.events
+│   │   └── openapi-parser.ts                # Modified: Parse x-sync.events + snapshot config
 │   └── generators/
-│       ├── event-store-generator.ts         # New: Dexie database
-│       ├── materializer-generator.ts        # New: Event → State
-│       ├── sync-engine-generator.ts         # New: Background sync
+│       ├── event-store-generator.ts         # New: PGlite database + typed queries
+│       ├── hlc-generator.ts                 # New: Hybrid Logical Clock
+│       ├── materializer-generator.ts        # New: Event → State with snapshots
+│       ├── sync-engine-generator.ts         # New: Background sync + leader election
 │       └── hook-generator.ts                # Modified: Event-based hooks
 └── templates/
-    ├── eventStore.ts.hbs                    # Dexie template
-    ├── materializer.ts.hbs                  # Materializer template
-    └── syncEngine.ts.hbs                    # Sync engine template
+    ├── db.ts.hbs                            # PGlite initialization
+    ├── eventStore.ts.hbs                    # Typed query functions
+    ├── hlc.ts.hbs                           # HLC implementation
+    ├── materializer.ts.hbs                  # Materializer with snapshots
+    └── syncEngine.ts.hbs                    # Sync engine + leader election
 ```
 
 ### Generated Output
@@ -1325,11 +1997,15 @@ sync-patterns/
 ├── events/
 │   └── {entity}.events.ts                   # Event type definitions
 ├── store/
-│   ├── eventStore.ts                        # Dexie database
-│   └── syncEngine.ts                        # Background sync
+│   ├── db.ts                                # PGlite initialization
+│   ├── eventStore.ts                        # Typed query functions (Zod validated)
+│   ├── hlc.ts                               # Hybrid Logical Clock
+│   └── syncEngine.ts                        # Background sync + leader election
 ├── materializers/
-│   └── {entity}.ts                          # Event → State conversion
+│   ├── utils.ts                             # Snapshot utilities
+│   └── {entity}.ts                          # Entity materializer with snapshots
 ├── hooks/
+│   ├── useSyncStatus.ts                     # Sync status + rejections
 │   └── use{Entity}.ts                       # React integration
 └── client/
     └── methods.ts                           # API client (includes /events/batch)
@@ -1410,103 +2086,134 @@ Once migration is complete, these will be deprecated:
 - `local_first: bool` config (replaced by `sync_mode`)
 - TanStack DB for sync (still useful for other purposes)
 
-## Open Questions
+## Decisions Made
 
-### 1. Conflict Resolution Strategy
+### ✅ 1. Conflict Resolution Strategy
 
-**Question**: How do we handle conflicting events from different devices?
+**Decision**: Use Hybrid Logical Clocks (HLC) for causally-correct ordering.
 
-**Options**:
-- Last-write-wins (timestamp-based)
-- Vector clocks for causal ordering
-- Custom merge functions per event type
-- Operational transforms (complex)
+**Why HLC over wall-clock timestamps**:
+- HLCs are monotonically increasing (no clock drift issues)
+- Preserve causality (if A happened-before B, HLC(A) < HLC(B))
+- No need for synchronized clocks across devices
+- Lexicographically sortable (simple string comparison)
 
-**Recommendation**: Start with last-write-wins. Add custom merge handlers for specific entities if needed (e.g., collaborative editing).
+**Implementation**: Phase 4 includes HLC implementation in `store/hlc.ts`.
 
-**Decision needed**: Phase 2
+### ✅ 2. Event Retention & Compaction
 
-### 2. Event Retention & Compaction
+**Decision**: Implement snapshot compaction with configurable thresholds per entity.
 
-**Question**: How long should events be kept in IndexedDB?
+**Configuration** (in backend Pattern class):
+```python
+sync_snapshot = {
+    "enabled": True,
+    "events_per_snapshot": 50,   # Create snapshot every 50 events
+    "max_events": 100,            # Force snapshot at 100 events
+}
+```
 
-**Considerations**:
-- Device storage limits (especially mobile)
-- Audit trail requirements
-- Query performance over large event logs
+**Behavior**:
+1. Materialize from snapshot + recent events (not from genesis)
+2. Auto-create snapshots when thresholds exceeded
+3. Prune old synced events after snapshot
 
-**Options**:
-- Keep 7 days, older events fetch from server on demand
-- Snapshot compaction (periodically replace N events with single state snapshot)
-- Configurable retention per entity type
+**Implementation**: Phase 4 includes `materializeWithSnapshots()` utility.
 
-**Recommendation**: 7-day default with configurable retention. Implement snapshot compaction in future iteration.
+### ✅ 3. Local Database Selection
 
-**Decision needed**: Phase 4
+**Decision**: Use PGlite (Postgres WASM) with type-safe generated query functions.
 
-### 3. Multi-Tenant Event Isolation
+**Why PGlite**:
+- Same SQL as backend (Postgres everywhere)
+- Real SQL features (CTEs, window functions, JSONB)
+- Smaller than alternatives (~1.4MB)
+- Consistent with ADR-005
 
-**Question**: How do we prevent tenant A from seeing tenant B's events?
+**Type Safety Approach** (not raw SQL, not full ORM):
+- Generate typed query functions from OpenAPI schemas
+- Zod validation on all query results
+- Parameterized queries (no string concatenation)
+- Composable for complex operations
 
-**Considerations**:
-- Notification channels need tenant filtering
-- Electric shapes need tenant predicates
-- Event store queries need tenant scoping
+### ✅ 4. Multi-Tab Coordination
 
-**Options**:
-- Add `tenant_id` to event schema
-- Namespace channels by tenant: `sync:order:tenant_123`
-- Filter in Electric shape definitions
+**Decision**: Use Web Locks API for leader election.
 
-**Recommendation**: Add `tenant_id` to LocalEvent and ClientEvent. Filter all queries by tenant. Namespace notification channels.
+**Behavior**:
+- Only leader tab runs sync engine
+- Other tabs still read/write to PGlite
+- Automatic leadership transfer on tab close
 
-**Decision needed**: Phase 2 (backend) and Phase 4 (frontend)
+**Implementation**: Phase 4 includes `LeaderElection` class in sync engine.
 
-### 4. Error Recovery & Retry
+---
 
-**Question**: What happens when event application fails on server?
+### ✅ 5. Multi-Tenant Event Isolation
 
-**Scenarios**:
-- Validation error (bad payload)
-- Business rule violation
-- Database constraint failure
-- Network timeout
+**Decision**: Add `tenant_id` to event schema with query-level filtering. Defer per-tenant database isolation for single-tenancy offerings.
 
-**Options**:
-- Retry indefinitely with backoff
-- Move to dead-letter queue after N retries
-- Surface errors in UI for manual resolution
-- Rollback local event (breaking optimistic UI)
+**Implementation**:
+- Add `tenant_id` column to events table
+- Filter all queries by current tenant
+- Namespace notification channels: `sync:{tenant}:{entity}`
 
-**Recommendation**:
-- Validation/business errors: reject immediately, show in UI
-- Transient errors: retry with exponential backoff
-- After 3 retries: surface in UI with retry/discard options
+**Rationale**: Query-level filtering is simpler and sufficient for multi-tenant SaaS. Per-tenant PGlite databases can be added later for enterprise single-tenancy deployments.
 
-**Decision needed**: Phase 3
+### ✅ 6. Error Recovery UX
 
-### 5. Schema Evolution
+**Decision**: Use snackbar/toast notifications for sync errors.
 
-**Question**: How do we handle event schema changes between versions?
+**Implementation**:
+- `useSyncStatus()` exposes `rejections` array
+- App renders snackbar for each rejection
+- Include retry/discard actions in snackbar
 
-**Scenarios**:
-- Client with old code receives new event format
-- Server receives old event format from outdated client
-- Event stored before schema change needs materialization
+**Example integration**:
+```typescript
+const { rejections } = useSyncStatus()
 
-**Options**:
-- Version events (e.g., `order.item_added.v2`)
-- Transform events on read (migrate old format to new)
-- Strict versioning (reject mismatched versions)
-- Schema registry with compatibility rules
+useEffect(() => {
+  for (const { event, reason } of rejections) {
+    toast.error(`Sync failed: ${reason}`, {
+      action: {
+        label: 'Retry',
+        onClick: () => syncEngine.retry(event.id)
+      }
+    })
+  }
+}, [rejections])
+```
 
-**Recommendation**: Add `schema_version` to events. Support backward compatibility (new code reads old events). Provide migration tools.
+**Note**: Exact UX to be refined during Phase 5 integration testing.
 
-**Decision needed**: Phase 4
+### ✅ 7. Schema Evolution
 
-### 6. WebSocket vs ElectricSQL vs Polling
+**Decision**: Add `schema_version` field to events. Support backward compatibility.
 
-**Question**: Which notification backend should be the default?
+**Implementation**:
+- Add `schema_version: number` to LocalEvent schema (default: 1)
+- Materializers handle old versions via migration functions
+- Server accepts old schemas, responds with current schema
+
+**Migration pattern**:
+```typescript
+function migrateEvent(event: LocalEvent): LocalEvent {
+  if (event.schema_version === 1) {
+    // Transform v1 → v2
+    return { ...event, payload: migratePayloadV1toV2(event.payload), schema_version: 2 }
+  }
+  return event
+}
+```
+
+### ✅ 8. Notification Backend Selection
+
+**Decision**: Implement Memory + Redis backends in Phase 1. Add ElectricSQL as fast follow.
+
+**Implementation order**:
+1. **Phase 1**: Memory backend (testing) + Redis backend (production)
+2. **Fast follow**: ElectricSQL streaming backend
 
 **Comparison**:
 
@@ -1517,13 +2224,16 @@ Once migration is complete, these will be deprecated:
 | WebSocket | Native support, standard | Custom protocol | Custom requirements |
 | Polling | No infra, works anywhere | Latency, inefficient | Simple deployments |
 
-**Recommendation**:
+**Defaults**:
 - Development: Memory backend
-- Production default: Redis pub/sub
-- Postgres shops: ElectricSQL
-- Fallback: Polling (no-push scenarios)
+- Production: Redis pub/sub
+- Future: ElectricSQL (fast follow after Phase 1)
 
-**Decision needed**: Phase 1
+---
+
+## Open Questions
+
+*All major architectural decisions have been made. Remaining questions are implementation details that will be resolved during development.*
 
 ## Timeline Breakdown
 
@@ -1532,11 +2242,11 @@ Once migration is complete, these will be deprecated:
 ```
 Phase 1: Notification Subsystem
 ├─ No dependencies
-└─ Outputs: Notification backends
+└─ Outputs: Memory + Redis notification backends
 
-Phase 2: Sync Extension
-├─ Depends on: Extension architecture (prerequisite)
+Phase 2: Sync Extension (Pragmatic)
 ├─ Depends on: Phase 1 (notification subsystem)
+├─ NO extension architecture needed (direct __init_subclass__)
 └─ Outputs: Event emission, discovery
 
 Phase 3: Router Generation
@@ -1545,11 +2255,11 @@ Phase 3: Router Generation
 
 Phase 4: Frontend Generation
 ├─ Depends on: Phase 3 (API endpoints)
-└─ Outputs: TypeScript event store, hooks
+└─ Outputs: PGlite store, HLC, snapshots, typed queries, React hooks
 
 Phase 5: Integration Testing
 ├─ Depends on: All phases
-└─ Outputs: Validated system
+└─ Outputs: Validated system, refined error UX
 ```
 
 ### Parallel Work Opportunities
@@ -1566,15 +2276,14 @@ Phase 5: Integration Testing
 ### Risk Mitigation
 
 **High Risk Areas:**
-1. Event ordering conflicts (Phase 5) - distributed systems problem
-   - Mitigation: Start with simple timestamp ordering, add complexity if needed
+1. ~~Event ordering conflicts (Phase 5)~~ → **Mitigated**: Using HLC for causal ordering
 2. Browser storage limits (Phase 4) - IndexedDB quotas
-   - Mitigation: Implement retention policy, monitoring
+   - Mitigation: Snapshot compaction prunes old events automatically
 
 **Low Risk Areas:**
 - Notification subsystem (follows proven pattern)
 - Router generation (simple FastAPI routes)
-- Event store (Dexie is mature, well-tested)
+- Event store (PGlite is mature, well-tested)
 
 ## Success Metrics
 
