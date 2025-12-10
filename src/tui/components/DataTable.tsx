@@ -14,6 +14,8 @@ import { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import chalk from 'chalk'
 import { renderField, type UIType, type FieldFormat } from '../renderers/index.js'
+import { useSearch, type SearchableField } from '../hooks/useSearch.js'
+import SearchBar from './SearchBar.js'
 
 /**
  * Column definition
@@ -70,18 +72,14 @@ export default function DataTable({
   pageSize = 25,
   onSelect,
   onBack,
-  searchQuery = '',
+  searchQuery: externalSearchQuery = '',
   totalCount,
   entityName = 'Records',
 }: DataTableProps) {
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedRow, setSelectedRow] = useState(0)
-
-  // Calculate total pages
-  const totalPages = Math.ceil(data.length / pageSize)
-  const startIdx = currentPage * pageSize
-  const endIdx = Math.min(startIdx + pageSize, data.length)
-  const pageData = data.slice(startIdx, endIdx)
+  const [internalSearchQuery, setInternalSearchQuery] = useState(externalSearchQuery)
+  const [searchActive, setSearchActive] = useState(false)
 
   // Infer columns from data if not provided
   const columns = useMemo(() => {
@@ -109,6 +107,32 @@ export default function DataTable({
   // Limit to 5-6 most important columns
   const visibleColumns = columns.slice(0, 6)
 
+  // Prepare searchable fields for useSearch hook
+  const searchableFields: SearchableField[] = useMemo(
+    () =>
+      columns.map((col) => ({
+        key: col.key,
+        uiType: col.uiType,
+      })),
+    [columns]
+  )
+
+  // Use the current search query (internal or external)
+  const currentSearchQuery = internalSearchQuery || externalSearchQuery
+
+  // Apply search filtering
+  const { filteredData, matchCount, totalCount: unfilteredCount, filters } = useSearch(
+    data,
+    currentSearchQuery,
+    searchableFields
+  )
+
+  // Calculate total pages based on filtered data
+  const totalPages = Math.ceil(filteredData.length / pageSize)
+  const startIdx = currentPage * pageSize
+  const endIdx = Math.min(startIdx + pageSize, filteredData.length)
+  const pageData = filteredData.slice(startIdx, endIdx)
+
   // Calculate column widths based on terminal width
   // Assuming 80+ column terminal, distribute width
   const columnWidths = useMemo(() => {
@@ -127,9 +151,18 @@ export default function DataTable({
     setSelectedRow(0)
   }, [currentPage])
 
+  // Reset to first page when search query changes
+  useEffect(() => {
+    setCurrentPage(0)
+    setSelectedRow(0)
+  }, [currentSearchQuery])
+
   // Keyboard navigation
   useInput((input, key) => {
     if (loading) return
+
+    // Don't handle table navigation if search is active
+    if (searchActive) return
 
     // Up arrow - previous row
     if (key.upArrow) {
@@ -175,11 +208,9 @@ export default function DataTable({
       onBack()
     }
 
-    // / - search (placeholder for now)
+    // / - enter search mode
     if (input === '/' && !key.meta && !key.ctrl) {
-      // TODO: Implement search mode in Issue 6
-      // For now, just log
-      console.log('Search mode coming soon...')
+      setSearchActive(true)
     }
   })
 
@@ -225,16 +256,31 @@ export default function DataTable({
       <Box borderStyle="single" borderColor="cyan" paddingX={1} marginBottom={1}>
         <Text>
           <Text bold color="cyan">{entityName}</Text>
-          <Text dimColor> ({totalCount || data.length} total</Text>
-          {searchQuery && (
-            <Text dimColor>, {data.length} matches</Text>
+          <Text dimColor> (</Text>
+          {currentSearchQuery ? (
+            <>
+              <Text color="green" bold>{matchCount}</Text>
+              <Text dimColor> of </Text>
+              <Text dimColor bold>{unfilteredCount}</Text>
+            </>
+          ) : (
+            <Text dimColor bold>{totalCount || data.length}</Text>
           )}
-          <Text dimColor>)</Text>
-          {searchQuery && (
-            <Text> [search: <Text color="yellow">{searchQuery}</Text>]</Text>
-          )}
+          <Text dimColor> total)</Text>
         </Text>
       </Box>
+
+      {/* Search Bar */}
+      <SearchBar
+        query={internalSearchQuery}
+        onQueryChange={setInternalSearchQuery}
+        active={searchActive}
+        onActiveChange={setSearchActive}
+        matchCount={matchCount}
+        totalCount={unfilteredCount}
+        filters={filters}
+        placeholder="Search or filter (field:value, field:>100, !field:value)"
+      />
 
       {/* Table */}
       <Box flexDirection="column">
@@ -290,7 +336,7 @@ export default function DataTable({
             Page {currentPage + 1} of {totalPages}
           </Text>
           <Text dimColor>
-            ↑/↓: Navigate  •  PgUp/PgDn: Page  •  Enter: Detail  •  Esc: Back  •  q: Quit
+            ↑/↓: Navigate  •  PgUp/PgDn: Page  •  /: Search  •  Enter: Detail  •  Esc: Back  •  q: Quit
           </Text>
         </Box>
       </Box>

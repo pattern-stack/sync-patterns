@@ -236,13 +236,14 @@ src/tui/components/DetailView.tsx  (~340 lines)
 
 ---
 
-## Issue 6: Search & Filtering
+## [x] Issue 6: Search & Filtering
 
 **Title**: `feat(tui): Search and filtering functionality`
 
 **Priority**: P1 (High)
 **Estimate**: 3 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -250,17 +251,17 @@ Add search and filtering capabilities to the DataTable view.
 
 ### Acceptance Criteria
 
-- [ ] Press `/` to enter search mode
-- [ ] Text input for search query
-- [ ] Filter across all text, email, url, phone fields
-- [ ] Case-insensitive matching
-- [ ] Show match count in header (12 of 142)
-- [ ] Highlight current search term
-- [ ] Clear search with Esc
-- [ ] Field-specific filters: `field:value` syntax
-- [ ] Support operators: `>`, `<`, `!` (not)
-- [ ] Multiple filters: `status:active type:premium`
-- [ ] Show active filters in header
+- [x] Press `/` to enter search mode
+- [x] Text input for search query
+- [x] Filter across all text, email, url, phone fields
+- [x] Case-insensitive matching
+- [x] Show match count in header (12 of 142)
+- [x] Highlight current search term
+- [x] Clear search with Esc
+- [x] Field-specific filters: `field:value` syntax
+- [x] Support operators: `>`, `<`, `!` (not)
+- [x] Multiple filters: `status:active type:premium`
+- [x] Show active filters in header
 
 ### Technical Notes
 
