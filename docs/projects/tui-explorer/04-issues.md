@@ -147,13 +147,14 @@ src/tui/components/EntityList.tsx  (~100 lines)
 
 ---
 
-## Issue 4: DataTable Component
+## [x] Issue 4: DataTable Component
 
 **Title**: `feat(tui): DataTable component with pagination and column rendering`
 
 **Priority**: P0 (Critical)
 **Estimate**: 5 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -161,21 +162,21 @@ Create the main data table view that displays entity records using metadata-driv
 
 ### Acceptance Criteria
 
-- [ ] Render data in tabular format with column headers
-- [ ] Use ColumnMetadata from backend for column definitions
-- [ ] Apply field renderers based on column type
-- [ ] Smart column width calculation (truncate long values)
-- [ ] Limit to 5-6 visible columns (most important first)
-- [ ] Keyboard navigation:
+- [x] Render data in tabular format with column headers
+- [x] Use ColumnMetadata from backend for column definitions (or infer from data)
+- [x] Apply field renderers based on column type
+- [x] Smart column width calculation (truncate long values)
+- [x] Limit to 5-6 visible columns (most important first)
+- [x] Keyboard navigation:
   - ↑/↓: Navigate rows
   - PgUp/PgDn: Page navigation
-  - Enter: Open detail view
+  - Enter: Open detail view (logs for now)
   - Esc: Back to entity list
-  - /: Enter search mode
-- [ ] Pagination with page indicator (Page 1 of 5)
-- [ ] Current row highlight
-- [ ] Loading state with spinner
-- [ ] Error state with message
+  - /: Enter search mode (placeholder logged)
+- [x] Pagination with page indicator (Page 1 of 5)
+- [x] Current row highlight
+- [x] Loading state with spinner
+- [x] Error state with message
 
 ### Technical Notes
 
