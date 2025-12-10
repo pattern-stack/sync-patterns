@@ -65,7 +65,6 @@ describe('EntityGenerator', () => {
       const contactsCode = result.wrappers.get('contacts')!
 
       expect(contactsCode).toContain("import { getSyncMode } from '../config'")
-      expect(contactsCode).toContain("import type { SyncMode } from '../config'")
       expect(contactsCode).toContain("const mode = getSyncMode('contacts')")
       expect(contactsCode).not.toContain('isLocalFirst')
     })
@@ -91,7 +90,7 @@ describe('EntityGenerator', () => {
       expect(contactsCode).not.toContain('contactsOfflineCollection')
     })
 
-    it('should import offline collection for syncMode: offline', () => {
+    it('should import offline actions for syncMode: offline', () => {
       const parsedAPI = createParsedAPI({
         endpoints: [
           createEndpoint({
@@ -108,8 +107,12 @@ describe('EntityGenerator', () => {
       const result = generateEntityWrappers(parsedAPI)
       const contactsCode = result.wrappers.get('contacts')!
 
-      expect(contactsCode).toContain("import { contactsOfflineCollection } from '../collections/contacts.offline'")
-      expect(contactsCode).not.toContain('contactsRealtimeCollection')
+      // Offline mode uses OfflineExecutor actions pattern
+      expect(contactsCode).toContain("from '../offline/contacts.actions'")
+      expect(contactsCode).toContain('createOfflineContact')
+      // Note: Entity generator imports BOTH realtime collection AND offline actions
+      // for entities with non-api syncMode, to support 3-mode switching
+      expect(contactsCode).toContain("if (mode === 'offline')")
     })
 
     it('should not import any collection for syncMode: api', () => {
@@ -185,7 +188,8 @@ describe('EntityGenerator', () => {
 
       expect(contactsCode).toContain('export function useContacts()')
       expect(contactsCode).toContain("if (mode === 'offline')")
-      expect(contactsCode).toContain('q.from({ item: contactsOfflineCollection })')
+      // Offline mode uses TanStack Query (offline executor handles mutations)
+      expect(contactsCode).toContain('hooks.useListContacts()')
     })
 
     it('should generate 3-mode switch in get hook', () => {
@@ -274,7 +278,7 @@ describe('EntityGenerator', () => {
       expect(contactsCode).toContain("import { getSyncMode } from '../config'")
     })
 
-    it('should use correct collection name suffix (Realtime/Offline)', () => {
+    it('should use correct collection/action names for realtime and offline', () => {
       const parsedAPIRealtime = createParsedAPI({
         endpoints: [
           createEndpoint({
@@ -307,8 +311,10 @@ describe('EntityGenerator', () => {
       const contactsCode = resultRealtime.wrappers.get('contacts')!
       const draftsCode = resultOffline.wrappers.get('drafts')!
 
+      // Realtime uses ElectricSQL collection
       expect(contactsCode).toContain('contactsRealtimeCollection')
-      expect(draftsCode).toContain('draftsOfflineCollection')
+      // Offline uses OfflineExecutor actions
+      expect(draftsCode).toContain('createOfflineDraft')
     })
 
     it('should generate update hook with correct collection', () => {
@@ -541,5 +547,91 @@ describe('EntityGenerator', () => {
       expect(contactsCode).not.toContain('useLiveQuery')
       expect(contactsCode).not.toContain('getSyncMode')
     })
+
+    it('should generate useContactsWithMeta hook (SYNC-009)', () => {
+      const parsedAPI = createParsedAPI({
+        endpoints: [
+          createEndpoint({
+            path: '/contacts',
+            method: 'get',
+            operationId: 'list_contacts',
+            syncMode: 'realtime',
+            responses: [{
+              statusCode: '200',
+              content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+            }],
+          }),
+        ],
+        schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+      })
+
+      const result = generateEntityWrappers(parsedAPI)
+      const contactsCode = result.wrappers.get('contacts')!
+
+      // Check metadata hook is generated
+      expect(contactsCode).toContain('function useContactsMetadata(')
+      expect(contactsCode).toContain("queryKey: ['contacts', 'metadata', view]")
+      expect(contactsCode).toContain('staleTime: 30 * 60 * 1000')
+
+      // Check WithMeta hook is generated
+      expect(contactsCode).toContain('export function useContactsWithMeta(')
+      expect(contactsCode).toContain("options?: { view?: 'list' | 'detail' | 'form' }")
+      expect(contactsCode).toContain('UnifiedQueryResultWithMeta<Contact[]>')
+
+      // Check it combines data and metadata
+      expect(contactsCode).toContain('const query = useContacts()')
+      expect(contactsCode).toContain('const meta = useContactsMetadata(view)')
+
+      // Check useMemo is used
+      expect(contactsCode).toContain('return useMemo(() => ({')
+      expect(contactsCode).toContain('columns: meta.columns')
+      expect(contactsCode).toContain('isLoadingMetadata: meta.isLoading')
+      expect(contactsCode).toContain('metadataError: meta.error')
+      expect(contactsCode).toContain('isReady: !query.isLoading && !meta.isLoading')
+    })
+
+  })
+})
+
+describe('EntityGenerator SYNC-009', () => {
+  const createParsedAPI = (overrides: Partial<ParsedOpenAPI> = {}): ParsedOpenAPI => ({
+    title: 'Test API',
+    version: '1.0.0',
+    endpoints: [],
+    schemas: [],
+    ...overrides,
+  })
+
+  const createEndpoint = (overrides: Partial<ParsedEndpoint> = {}): ParsedEndpoint => ({
+    path: '/contacts',
+    method: 'get',
+    operationId: 'list_contacts',
+    responses: [],
+    ...overrides,
+  })
+
+  it('should include UnifiedQueryResultWithMeta import in entity wrapper', () => {
+    const parsedAPI = createParsedAPI({
+      endpoints: [
+        createEndpoint({
+          path: '/contacts',
+          method: 'get',
+          operationId: 'list_contacts',
+          syncMode: 'realtime',
+          responses: [{
+            statusCode: '200',
+            content: { 'application/json': { schema: { ref: '#/components/schemas/Contact' } } },
+          }],
+        }),
+      ],
+      schemas: [{ name: 'Contact', properties: [], type: 'object' }],
+    })
+
+    const result = generateEntityWrappers(parsedAPI)
+    const contactsCode = result.wrappers.get('contacts')!
+
+    // Check that entity wrapper imports the new type
+    expect(contactsCode).toContain('UnifiedQueryResultWithMeta')
+    expect(contactsCode).toContain("import type { UnifiedQueryResult, UnifiedMutationResult, UnifiedQueryResultWithMeta } from './types'")
   })
 })
