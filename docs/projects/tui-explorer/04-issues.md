@@ -106,13 +106,14 @@ src/tui/utils/terminal.ts          (~50 lines - capability detection)
 
 ---
 
-## Issue 3: Entity Discovery & Navigation
+## [x] Issue 3: Entity Discovery & Navigation
 
 **Title**: `feat(tui): Entity discovery and EntityList navigation component`
 
 **Priority**: P0 (Critical)
 **Estimate**: 2 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -120,17 +121,17 @@ Dynamically discover available entities from generated code and provide a naviga
 
 ### Acceptance Criteria
 
-- [ ] Scan `src/generated/entities/` to find entity modules
-- [ ] Extract entity metadata: name, displayName, syncMode, available operations
-- [ ] Detect sync mode (api/realtime/offline) from imports
-- [ ] Create `EntityList` component with:
-  - Scrollable list of entities with record counts
+- [x] Scan `src/generated/entities/` to find entity modules
+- [x] Extract entity metadata: name, displayName, syncMode, available operations
+- [x] Detect sync mode (api/realtime/offline) from imports
+- [x] Create `EntityList` component with:
+  - Scrollable list of entities with operation counts (not record counts - more useful)
   - Arrow key navigation (↑/↓)
   - Enter to select, Esc to go back
   - Current selection highlight
-  - Sync mode indicator per entity (● realtime, ○ api)
-- [ ] Show loading state while fetching counts
-- [ ] Handle empty entities gracefully
+  - Sync mode indicator per entity (● realtime, ○ api, ◐ offline)
+- [x] Show loading state while discovering entities
+- [x] Handle empty entities gracefully
 
 ### Technical Notes
 
@@ -276,13 +277,14 @@ src/tui/hooks/useSearch.ts         (~60 lines)
 
 ---
 
-## Issue 7: Generated Hook Integration
+## [x] Issue 7: Generated Hook Integration
 
 **Title**: `feat(tui): Integrate with sync-patterns generated hooks`
 
 **Priority**: P0 (Critical)
 **Estimate**: 3 points
 **Labels**: `feature`, `phase-1`
+**Status**: COMPLETED
 
 ### Description
 
@@ -290,16 +292,16 @@ Wire up the TUI to consume actual data from generated entity hooks, supporting b
 
 ### Acceptance Criteria
 
-- [ ] Dynamically import hooks from `src/generated/entities/`
-- [ ] Support `useList()` for entity tables
-- [ ] Support `useOne(id)` for detail view
-- [ ] Support `useMetadata()` for column definitions
-- [ ] Handle loading states from hooks
-- [ ] Handle error states from hooks
-- [ ] Detect and display sync mode (realtime/offline/api)
-- [ ] Show sync status indicator in header
-- [ ] Works with both TanStack Query (api) and TanStack DB (realtime/offline)
-- [ ] Graceful handling when hooks fail to load
+- [x] Dynamically import hooks from `src/generated/entities/`
+- [x] Support `useList()` for entity tables
+- [x] Support `useOne(id)` for detail view
+- [x] Support `useListWithMeta()` for column definitions
+- [x] Handle loading states from hooks
+- [x] Handle error states from hooks
+- [x] Detect and display sync mode (realtime/offline/api)
+- [x] Sync mode indicator shown per entity in list (not global header)
+- [x] Works with both TanStack Query (api) and TanStack DB (realtime/offline)
+- [x] Graceful handling when hooks fail to load
 
 ### Technical Notes
 
