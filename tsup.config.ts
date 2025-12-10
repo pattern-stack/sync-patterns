@@ -34,5 +34,6 @@ export default defineConfig([
     banner: {
       js: '#!/usr/bin/env node',
     },
+    external: ['ink', 'react', '@tanstack/react-query', 'chalk'],
   },
 ])

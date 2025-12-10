@@ -4,10 +4,12 @@
  * Root component for the interactive terminal UI
  */
 
-import { useState } from 'react'
+import React from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import chalk from 'chalk'
+import { useNavigation } from './hooks/useNavigation'
+import { EntityList } from './components/EntityList'
 
 export interface AppProps {
   entity?: string
@@ -34,14 +36,20 @@ const queryClient = new QueryClient({
 
 function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProps) {
   const { exit } = useApp()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [view, _setView] = useState<'welcome' | 'entity-list'>('welcome')
+  const navigation = useNavigation(entity ? 'table' : 'entity-list')
 
-  // Handle keyboard input
+  // Handle global keyboard input
   useInput((input, key) => {
-    // Quit on 'q' or Ctrl+C
-    if (input === 'q' || (key.ctrl && input === 'c')) {
+    // Quit on 'q' (when at top level) or Ctrl+C
+    if ((input === 'q' && navigation.state.view === 'entity-list') || (key.ctrl && input === 'c')) {
       exit()
+    }
+
+    // Navigate back on Esc
+    if (key.escape) {
+      if (navigation.state.view === 'table' || navigation.state.view === 'detail') {
+        navigation.goBack()
+      }
     }
 
     // Help on '?'
@@ -49,6 +57,15 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
       // Show help (TODO: implement help overlay in Issue 8)
     }
   })
+
+  // Entity list handlers
+  const handleEntitySelect = (entityName: string) => {
+    navigation.goToTable(entityName)
+  }
+
+  const handleEntityListBack = () => {
+    exit()
+  }
 
   // Determine sync mode indicator
   const syncModeIndicator = mode === 'optimistic'
@@ -74,41 +91,25 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
 
       {/* Main Content */}
       <Box flexDirection="column" flexGrow={1}>
-        {view === 'welcome' && (
+        {navigation.state.view === 'entity-list' && (
+          <EntityList onSelect={handleEntitySelect} onBack={handleEntityListBack} />
+        )}
+
+        {navigation.state.view === 'table' && (
           <Box flexDirection="column" padding={2}>
             <Box marginBottom={1}>
-              <Text bold color="green">Welcome to TUI Explorer!</Text>
-            </Box>
-
-            <Box flexDirection="column" marginBottom={2}>
-              <Text>
-                The interactive terminal UI for exploring Pattern Stack entities.
+              <Text bold color="cyan">
+                Entity: {navigation.state.selectedEntity}
               </Text>
             </Box>
-
-            <Box flexDirection="column" marginBottom={2}>
-              <Text bold>Features (Coming Soon):</Text>
-              <Box marginLeft={2} flexDirection="column">
-                <Text>• Browse all entities with record counts</Text>
-                <Text>• View data in tables with smart field rendering</Text>
-                <Text>• Search and filter records</Text>
-                <Text>• View detailed record information</Text>
-                <Text>• Inspect API requests and responses</Text>
-              </Box>
+            <Box marginBottom={2}>
+              <Text color="yellow">Table view coming in Issue 4 (DataTable Component)</Text>
             </Box>
-
-            {entity && (
-              <Box marginBottom={2}>
-                <Text>
-                  Starting entity: <Text bold color="cyan">{entity}</Text>
-                </Text>
-              </Box>
-            )}
-
             {debug && (
               <Box marginBottom={2} borderStyle="single" borderColor="yellow" padding={1}>
                 <Box flexDirection="column">
-                  <Text bold color="yellow">Debug Mode</Text>
+                  <Text bold color="yellow">Debug Info</Text>
+                  <Text dimColor>Entity: {navigation.state.selectedEntity}</Text>
                   <Text dimColor>API URL: {apiUrl}</Text>
                   <Text dimColor>Mode: {mode || 'auto'}</Text>
                   <Text dimColor>Page Size: {pageSize}</Text>
@@ -116,11 +117,24 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
                 </Box>
               </Box>
             )}
+            <Box>
+              <Text dimColor>Press Esc to go back to entity list</Text>
+            </Box>
+          </Box>
+        )}
 
-            <Box marginTop={1}>
-              <Text dimColor>
-                This is Phase 1 foundation. Full functionality coming in future issues.
+        {navigation.state.view === 'detail' && (
+          <Box flexDirection="column" padding={2}>
+            <Box marginBottom={1}>
+              <Text bold color="cyan">
+                Detail: {navigation.state.selectedEntity}
               </Text>
+            </Box>
+            <Box marginBottom={2}>
+              <Text color="yellow">Detail view coming in Issue 5 (DetailView Component)</Text>
+            </Box>
+            <Box>
+              <Text dimColor>Press Esc to go back to table</Text>
             </Box>
           </Box>
         )}
@@ -128,9 +142,21 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
 
       {/* Footer / Status Bar */}
       <Box borderStyle="single" borderColor="gray" paddingX={1}>
-        <Text dimColor>
-          q: Quit  •  ?: Help  •  Entity exploration coming soon...
-        </Text>
+        {navigation.state.view === 'entity-list' && (
+          <Text dimColor>
+            ↑/↓: Navigate  •  Enter: Select  •  q: Quit
+          </Text>
+        )}
+        {navigation.state.view === 'table' && (
+          <Text dimColor>
+            Esc: Back to entities  •  q: Quit
+          </Text>
+        )}
+        {navigation.state.view === 'detail' && (
+          <Text dimColor>
+            Esc: Back to table  •  q: Quit
+          </Text>
+        )}
       </Box>
     </Box>
   )
