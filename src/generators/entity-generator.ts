@@ -501,7 +501,13 @@ export class EntityGenerator {
       lines.push(`import type { ${wrapperTypes.join(', ')} } from '../schemas/index'`)
     }
 
-    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult } from './types'")
+    // Import TanStack Query and React for metadata hooks
+    lines.push("import { useQuery } from '@tanstack/react-query'")
+    lines.push("import { useMemo } from 'react'")
+    lines.push("import { apiClient } from '../client'")
+    lines.push("import type { ColumnMetadata, ColumnMetadataResponse } from '@pattern-stack/frontend-patterns'")
+
+    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult, UnifiedQueryResultWithMeta } from './types'")
     lines.push('')
 
     // =========================================================================
@@ -512,9 +518,16 @@ export class EntityGenerator {
     lines.push('// ============================================================================')
     lines.push('')
 
+    // Generate metadata hook (internal - used by WithMeta hook)
+    lines.push(this.generateMetadataHook(entity))
+    lines.push('')
+
     if (hasOp.list) {
       const listOp = operations.find(op => op.type === 'list')!
       lines.push(this.generateListHookAllModes(entity, listOp, supportsRealtime, supportsOffline))
+      lines.push('')
+      // Generate WithMeta hook for list operations
+      lines.push(this.generateListWithMetaHook(entity, listOp))
       lines.push('')
     }
 
@@ -541,6 +554,85 @@ export class EntityGenerator {
       lines.push(this.generateDeleteHookAllModes(entity, deleteOp, supportsRealtime, supportsOffline))
       lines.push('')
     }
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate metadata hook for fetching column metadata
+   * Internal hook - used by use{Entity}WithMeta()
+   */
+  private generateMetadataHook(entity: EntityInfo): string {
+    const { namePlural, pascalName } = entity
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Fetch column metadata for ${namePlural}.`)
+      lines.push(' * Uses 30-minute staleTime since metadata rarely changes.')
+      lines.push(' * Internal hook - used by use{Entity}WithMeta().')
+      lines.push(' */')
+    }
+
+    lines.push(`function use${pascalName}sMetadata(view: 'list' | 'detail' | 'form' = 'list') {`)
+    lines.push('  const metadataQuery = useQuery({')
+    lines.push(`    queryKey: ['${namePlural}', 'metadata', view],`)
+    lines.push(`    queryFn: () => apiClient.get<ColumnMetadataResponse>(`)
+    lines.push(`      \`/api/v1/${namePlural}/fields/metadata?view=\${view}\``)
+    lines.push('    ),')
+    lines.push('    staleTime: 30 * 60 * 1000,  // 30 min - metadata is schema-driven, rarely changes')
+    lines.push('  })')
+    lines.push('')
+    lines.push('  return {')
+    lines.push('    columns: metadataQuery.data?.columns ?? [],')
+    lines.push('    isLoading: metadataQuery.isLoading,')
+    lines.push('    error: metadataQuery.error ?? null,')
+    lines.push('  }')
+    lines.push('}')
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Generate WithMeta hook that combines data and metadata
+   */
+  private generateListWithMetaHook(entity: EntityInfo, operation: CrudOperation): string {
+    const { namePlural, pascalName } = entity
+    const entityType = this.getEntityType(entity)
+    const lines: string[] = []
+
+    if (this.options.includeJSDoc) {
+      lines.push('/**')
+      lines.push(` * Fetch all ${namePlural} with column metadata.`)
+      lines.push(' * Combines sync-aware data query with metadata query.')
+      lines.push(' *')
+      lines.push(' * @example')
+      lines.push(` * const { data, columns, isReady, error } = use${pascalName}sWithMeta()`)
+      lines.push(' * if (!isReady) return <Loading />')
+      lines.push(' * return <DataTable query={query} />')
+      lines.push(' */')
+    }
+
+    lines.push(`export function use${pascalName}sWithMeta(`)
+    lines.push("  options?: { view?: 'list' | 'detail' | 'form' }")
+    lines.push(`): UnifiedQueryResultWithMeta<${entityType}[]> {`)
+    lines.push("  const { view = 'list' } = options ?? {}")
+    lines.push('')
+    lines.push('  // Data query (sync-aware - uses TanStack DB, offline, or API)')
+    lines.push(`  const query = use${pascalName}s()`)
+    lines.push('')
+    lines.push('  // Metadata query (always API - metadata doesn\'t need sync)')
+    lines.push(`  const meta = use${pascalName}sMetadata(view)`)
+    lines.push('')
+    lines.push('  // Memoize return value to prevent unnecessary re-renders')
+    lines.push('  return useMemo(() => ({')
+    lines.push('    ...query,')
+    lines.push('    columns: meta.columns,')
+    lines.push('    isLoadingMetadata: meta.isLoading,')
+    lines.push('    metadataError: meta.error,')
+    lines.push('    isReady: !query.isLoading && !meta.isLoading,')
+    lines.push('  }), [query, meta.columns, meta.isLoading, meta.error])')
+    lines.push('}')
 
     return lines.join('\n')
   }
@@ -1289,6 +1381,8 @@ export class EntityGenerator {
 
     lines.push(this.generateFileHeader('Entity Wrapper Types'))
     lines.push('')
+    lines.push("import type { ColumnMetadata } from '@pattern-stack/frontend-patterns'")
+    lines.push('')
     lines.push('/**')
     lines.push(' * Shared types for unified entity wrappers')
     lines.push(' */')
@@ -1308,6 +1402,22 @@ export class EntityGenerator {
     lines.push('  mutateAsync: (variables: TVariables) => Promise<TData>')
     lines.push('  isPending: boolean')
     lines.push('  error: Error | null')
+    lines.push('}')
+    lines.push('')
+
+    lines.push('/**')
+    lines.push(' * Extended query result that includes column metadata.')
+    lines.push(' * Used by use{Entity}WithMeta() hooks to provide both data and metadata.')
+    lines.push(' */')
+    lines.push('export interface UnifiedQueryResultWithMeta<T> extends UnifiedQueryResult<T> {')
+    lines.push('  /** Column metadata for rendering tables/forms */')
+    lines.push('  columns: ColumnMetadata[]')
+    lines.push('  /** Whether metadata is still loading */')
+    lines.push('  isLoadingMetadata: boolean')
+    lines.push('  /** Metadata-specific error (if data succeeded but metadata failed) */')
+    lines.push('  metadataError: Error | null')
+    lines.push('  /** True when both data AND metadata are loaded */')
+    lines.push('  isReady: boolean')
     lines.push('}')
     lines.push('')
 

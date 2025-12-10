@@ -262,7 +262,7 @@ export class EntitiesHookGenerator {
     lines.push('')
 
     // Import shared types
-    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult } from './entities/types'")
+    lines.push("import type { UnifiedQueryResult, UnifiedMutationResult, UnifiedQueryResultWithMeta } from './entities/types'")
     lines.push('')
 
     // Import hooks from each entity (no type imports - use generic EntityApi)
@@ -281,7 +281,10 @@ export class EntitiesHookGenerator {
     const hooks: string[] = []
 
     // Hooks - entity-generator uses use${PascalName}s (just adds 's'), not proper pluralization
-    if (entity.hasList) hooks.push(`use${entity.pascalName}s`)
+    if (entity.hasList) {
+      hooks.push(`use${entity.pascalName}s`)
+      hooks.push(`use${entity.pascalName}sWithMeta`)
+    }
     if (entity.hasGet) hooks.push(`use${entity.pascalName}`)
     if (entity.hasCreate) hooks.push(`useCreate${entity.pascalName}`)
     if (entity.hasUpdate) hooks.push(`useUpdate${entity.pascalName}`)
@@ -324,6 +327,9 @@ export class EntitiesHookGenerator {
     lines.push('  useOne: (id: string) => UnifiedQueryResult<any>')
     lines.push('  /** Fetch column metadata - hook reference, consumer calls */')
     lines.push("  useMetadata: (view?: 'list' | 'detail' | 'form') => MetadataResult")
+    lines.push('  /** Fetch all entities with metadata - hook reference, consumer calls */')
+    lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
+    lines.push("  useListWithMeta: (options?: { view?: 'list' | 'detail' | 'form' }) => UnifiedQueryResultWithMeta<any[]>")
     lines.push('  /** Create mutation - result, already initialized */')
     lines.push('  // eslint-disable-next-line @typescript-eslint/no-explicit-any')
     lines.push('  create?: UnifiedMutationResult<any, any>')
@@ -413,6 +419,7 @@ export class EntitiesHookGenerator {
       lines.push(`    useList: use${entity.pascalName}s,`)
       lines.push(`    useOne: use${entity.pascalName},`)
       lines.push(`    useMetadata: createMetadataHook('${entity.namePlural}'),`)
+      if (entity.hasList) lines.push(`    useListWithMeta: use${entity.pascalName}sWithMeta,`)
       if (entity.hasCreate) lines.push(`    create: ${entity.namePlural}Create,`)
       if (entity.hasUpdate) lines.push(`    update: ${entity.namePlural}Update,`)
       if (entity.hasDelete) lines.push(`    delete: ${entity.namePlural}Delete,`)
