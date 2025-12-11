@@ -17,6 +17,8 @@ export interface EntityListProps {
   onSelect: (entityName: string) => void
   /** Callback when escape is pressed */
   onBack: () => void
+  /** Path to generated code directory */
+  generatedDir?: string
 }
 
 /**
@@ -34,7 +36,7 @@ function getSyncModeIndicator(mode: SyncMode): string {
   }
 }
 
-export function EntityList({ onSelect, onBack }: EntityListProps) {
+export function EntityList({ onSelect, onBack, generatedDir }: EntityListProps) {
   const [entities, setEntities] = useState<EntityMetadata[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -45,7 +47,7 @@ export function EntityList({ onSelect, onBack }: EntityListProps) {
     try {
       setIsLoading(true)
       setError(null)
-      const discovered = await discoverEntities()
+      const discovered = await discoverEntities(generatedDir)
       setEntities(discovered)
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
@@ -138,9 +140,6 @@ export function EntityList({ onSelect, onBack }: EntityListProps) {
           const isSelected = index === selectedIndex
           const syncIndicator = getSyncModeIndicator(entity.syncMode)
 
-          // Count available operations
-          const opCount = Object.values(entity.operations).filter(Boolean).length
-
           return (
             <Box key={entity.name} paddingY={0}>
               <Box width={2}>
@@ -156,12 +155,7 @@ export function EntityList({ onSelect, onBack }: EntityListProps) {
               </Box>
               <Box>
                 <Text dimColor>
-                  {opCount} operation{opCount !== 1 ? 's' : ''}
-                  {entity.operations.list && ' • list'}
-                  {entity.operations.get && ' • get'}
-                  {entity.operations.create && ' • create'}
-                  {entity.operations.update && ' • update'}
-                  {entity.operations.delete && ' • delete'}
+                  {entity.hooks.length} hook{entity.hooks.length !== 1 ? 's' : ''}
                 </Text>
               </Box>
             </Box>

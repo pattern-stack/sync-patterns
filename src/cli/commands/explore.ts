@@ -20,6 +20,8 @@ export interface ExploreOptions {
   theme?: 'light' | 'dark' | 'auto'
   pageSize?: string
   debug?: boolean
+  generatedDir?: string
+  list?: boolean
 }
 
 async function checkGeneratedCode(outputDir: string): Promise<boolean> {
@@ -31,25 +33,82 @@ async function checkGeneratedCode(outputDir: string): Promise<boolean> {
   }
 }
 
+/**
+ * Common paths where generated code might be located
+ */
+const GENERATED_PATHS = [
+  'application/frontend/src/generated',   // Pattern Stack monorepo
+  'frontend/src/generated',               // Simple monorepo
+  'packages/frontend/src/generated',      // Nx/Turborepo
+  'src/generated',                        // Standalone frontend
+]
+
+async function findGeneratedDir(): Promise<string | null> {
+  for (const path of GENERATED_PATHS) {
+    const fullPath = join(process.cwd(), path, 'entities')
+    try {
+      await fs.access(fullPath)
+      return path
+    } catch {
+      // Try next path
+    }
+  }
+  return null
+}
+
 export async function exploreCommand(options: ExploreOptions): Promise<void> {
   try {
-    // Check if generated code exists
-    const generatedDir = join(process.cwd(), 'src', 'generated')
-    const hasGenerated = await checkGeneratedCode(generatedDir)
+    // Find generated code directory
+    const generatedDir = options.generatedDir || await findGeneratedDir()
 
-    if (!hasGenerated) {
+    if (!generatedDir) {
       console.error('Error: Generated code not found')
       console.error('')
       console.error('The TUI Explorer requires generated code to function.')
+      console.error('Searched in:')
+      for (const path of GENERATED_PATHS) {
+        console.error(`  - ${path}`)
+      }
+      console.error('')
       console.error('Please run the following command first:')
       console.error('')
-      console.error('  sync-patterns generate <openapi-spec>')
+      console.error('  sync-patterns generate <openapi-spec> --output <dir>')
       console.error('')
-      console.error('Example:')
-      console.error('  sync-patterns generate ./openapi.json')
-      console.error('  sync-patterns generate http://localhost:8000/openapi.json')
+      console.error('Or specify the directory:')
+      console.error('')
+      console.error('  sync-patterns explore --generated-dir <path>')
       console.error('')
       process.exit(1)
+    }
+
+    const fullGeneratedPath = join(process.cwd(), generatedDir)
+    const hasGenerated = await checkGeneratedCode(join(fullGeneratedPath, 'entities'))
+
+    if (!hasGenerated) {
+      console.error(`Error: No entities found in ${generatedDir}`)
+      console.error('')
+      console.error('Run sync-patterns generate first.')
+      process.exit(1)
+    }
+
+    // List mode - just output entities without interactive TUI
+    if (options.list) {
+      const { discoverEntities } = await import('../../tui/utils/entity-discovery.js')
+      const entities = await discoverEntities(generatedDir)
+
+      if (entities.length === 0) {
+        console.log('No entities found in', generatedDir)
+      } else {
+        console.log(`Found ${entities.length} entities:\n`)
+        for (const entity of entities) {
+          const modeIcon = entity.syncMode === 'realtime' ? '●' : entity.syncMode === 'offline' ? '◐' : '○'
+          console.log(`  ${modeIcon} ${entity.displayName} (${entity.name})`)
+          console.log(`    Mode: ${entity.syncMode}`)
+          console.log(`    Hooks: ${entity.hooks.length > 0 ? entity.hooks.join(', ') : 'none detected'}`)
+          console.log('')
+        }
+      }
+      process.exit(0)
     }
 
     // Validate pageSize if provided
@@ -88,6 +147,7 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
         theme: options.theme || 'auto',
         pageSize: options.pageSize ? parseInt(options.pageSize, 10) : 25,
         debug: options.debug || false,
+        generatedDir,
       })
     )
 

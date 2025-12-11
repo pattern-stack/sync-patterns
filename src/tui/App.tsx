@@ -7,11 +7,12 @@
 import React, { useState } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useNavigation } from './hooks/useNavigation'
-import { EntityList } from './components/EntityList'
-import Header from './components/Header'
-import StatusBar from './components/StatusBar'
-import HelpOverlay from './components/HelpOverlay'
+import { useNavigation } from './hooks/useNavigation.js'
+import { EntityList } from './components/EntityList.js'
+import Header from './components/Header.js'
+import StatusBar from './components/StatusBar.js'
+import HelpOverlay from './components/HelpOverlay.js'
+import EntityTableView from './components/EntityTableView.js'
 
 export interface AppProps {
   entity?: string
@@ -23,6 +24,7 @@ export interface AppProps {
   theme: 'light' | 'dark' | 'auto'
   pageSize: number
   debug: boolean
+  generatedDir: string
 }
 
 // Create a QueryClient for TanStack Query integration
@@ -36,7 +38,7 @@ const queryClient = new QueryClient({
   },
 })
 
-function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProps) {
+function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug, generatedDir }: AppProps) {
   const { exit } = useApp()
   const navigation = useNavigation(entity ? 'table' : 'entity-list')
   const [showHelp, setShowHelp] = useState(false)
@@ -99,35 +101,22 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
       {/* Main Content */}
       <Box flexDirection="column" flexGrow={1}>
         {navigation.state.view === 'entity-list' && (
-          <EntityList onSelect={handleEntitySelect} onBack={handleEntityListBack} />
+          <EntityList
+            onSelect={handleEntitySelect}
+            onBack={handleEntityListBack}
+            generatedDir={generatedDir}
+          />
         )}
 
-        {navigation.state.view === 'table' && (
-          <Box flexDirection="column" padding={2}>
-            <Box marginBottom={1}>
-              <Text bold color="cyan">
-                Entity: {navigation.state.selectedEntity}
-              </Text>
-            </Box>
-            <Box marginBottom={2}>
-              <Text color="yellow">Table view coming in Issue 4 (DataTable Component)</Text>
-            </Box>
-            {debug && (
-              <Box marginBottom={2} borderStyle="single" borderColor="yellow" padding={1}>
-                <Box flexDirection="column">
-                  <Text bold color="yellow">Debug Info</Text>
-                  <Text dimColor>Entity: {navigation.state.selectedEntity}</Text>
-                  <Text dimColor>API URL: {apiUrl}</Text>
-                  <Text dimColor>Mode: {mode || 'auto'}</Text>
-                  <Text dimColor>Page Size: {pageSize}</Text>
-                  {recordId && <Text dimColor>Record ID: {recordId}</Text>}
-                </Box>
-              </Box>
-            )}
-            <Box>
-              <Text dimColor>Press Esc to go back to entity list</Text>
-            </Box>
-          </Box>
+        {navigation.state.view === 'table' && navigation.state.selectedEntity && (
+          <EntityTableView
+            key={navigation.state.selectedEntity}
+            entityName={navigation.state.selectedEntity}
+            generatedDir={generatedDir}
+            pageSize={pageSize}
+            onSelect={(row) => navigation.goToDetail(navigation.state.selectedEntity!, String(row.id || ''))}
+            onBack={() => navigation.goBack()}
+          />
         )}
 
         {navigation.state.view === 'detail' && (

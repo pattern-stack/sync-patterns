@@ -86,6 +86,8 @@ program
   .option('--theme <theme>', 'Color theme (light|dark|auto)', 'auto')
   .option('--page-size <n>', 'Records per page', '25')
   .option('--debug', 'Enable debug logging')
+  .option('--generated-dir <path>', 'Path to generated code directory')
+  .option('--list', 'List discovered entities and exit')
   .action(exploreCommand)
 
 // Help command

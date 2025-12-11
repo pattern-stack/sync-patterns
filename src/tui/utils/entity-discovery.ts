@@ -16,14 +16,8 @@ export interface EntityMetadata {
   displayName: string
   /** Sync mode detected from config or imports */
   syncMode: SyncMode
-  /** Available operations (detected from exported hooks) */
-  operations: {
-    list: boolean
-    get: boolean
-    create: boolean
-    update: boolean
-    delete: boolean
-  }
+  /** All exported hook functions (e.g., ['useAccounts', 'useCreateAccount', 'useTransitionAccountStage']) */
+  hooks: string[]
   /** Path to the entity module */
   modulePath: string
 }
@@ -83,8 +77,8 @@ async function extractEntityMetadata(
     // Detect sync mode from imports
     const syncMode = detectSyncMode(content)
 
-    // Detect available operations from exported hooks
-    const operations = detectOperations(content, entityName)
+    // Detect all exported hooks
+    const hooks = detectHooks(content)
 
     // Generate display name (singular PascalCase)
     const displayName = toDisplayName(entityName)
@@ -93,7 +87,7 @@ async function extractEntityMetadata(
       name: entityName,
       displayName,
       syncMode,
-      operations,
+      hooks,
       modulePath: filePath,
     }
   } catch (error) {
@@ -124,28 +118,32 @@ function detectSyncMode(content: string): SyncMode {
 }
 
 /**
- * Detect available operations from exported functions
+ * Detect all exported hook functions (any function starting with 'use')
  */
-function detectOperations(content: string, entityName: string): EntityMetadata['operations'] {
-  const displayName = toDisplayName(entityName)
+function detectHooks(content: string): string[] {
+  const hooks: string[] = []
 
-  return {
-    // List: use{Entity}s or use{Entity}sWithMeta
-    list: content.includes(`export function use${displayName}s`) ||
-          content.includes(`export function use${displayName}sWithMeta`),
-
-    // Get: use{Entity}(
-    get: content.includes(`export function use${displayName}(`),
-
-    // Create: useCreate{Entity}
-    create: content.includes(`export function useCreate${displayName}`),
-
-    // Update: useUpdate{Entity}
-    update: content.includes(`export function useUpdate${displayName}`),
-
-    // Delete: useDelete{Entity}
-    delete: content.includes(`export function useDelete${displayName}`),
+  // Match: export function useXxx or export { useXxx }
+  const functionPattern = /export\s+function\s+(use\w+)/g
+  let match
+  while ((match = functionPattern.exec(content)) !== null) {
+    hooks.push(match[1])
   }
+
+  // Also check for re-exported hooks: export { useXxx, useYyy } from
+  const reexportPattern = /export\s*\{([^}]+)\}/g
+  while ((match = reexportPattern.exec(content)) !== null) {
+    const exports = match[1].split(',').map(s => s.trim())
+    for (const exp of exports) {
+      // Handle "useXxx" or "useXxx as useYyy"
+      const name = exp.split(/\s+as\s+/)[0].trim()
+      if (name.startsWith('use') && !hooks.includes(name)) {
+        hooks.push(name)
+      }
+    }
+  }
+
+  return hooks.sort()
 }
 
 /**
