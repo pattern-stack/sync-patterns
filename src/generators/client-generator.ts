@@ -672,14 +672,13 @@ export * from './config'
 // Import createAPIClient explicitly for use below (export * doesn't hoist)
 import { createAPIClient } from './config'
 
-// Environment variable for API URL (works with Vite, Next.js, CRA, etc.)
-// Vite uses import.meta.env, Next.js/CRA use process.env (bundler replaces at build time)
+// Environment variable for API URL (works with Vite, Next.js, CRA, Node.js, etc.)
 function getApiUrl(): string {
-  // Vite environment
-  if (typeof import.meta !== 'undefined' && import.meta.env?.${envVar}) {
-    return import.meta.env.${envVar}
+  // Try process.env first (Node.js, Next.js, CRA)
+  if (typeof process !== 'undefined' && process.env?.${envVar}) {
+    return process.env.${envVar}
   }
-  // Fallback URL
+  // Fallback URL (Vite injects at build time, or use default)
   return '${fallbackUrl}'
 }
 

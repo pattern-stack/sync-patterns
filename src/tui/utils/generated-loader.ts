@@ -8,10 +8,12 @@
 import { createJiti } from 'jiti'
 import { join } from 'path'
 
-// Create jiti instance for loading TypeScript
+// Create jiti instance for loading TypeScript with ESM support
 const jiti = createJiti(import.meta.url, {
   // Interop for ESM/CJS compatibility
   interopDefault: true,
+  // Enable ESM syntax support
+  esmResolve: true,
 })
 
 export interface GeneratedModules {
@@ -142,15 +144,22 @@ export function loadEntityModule(
   entityName: string
 ): EntityModule | null {
   const basePath = join(process.cwd(), generatedDir)
+  const entityPath = join(basePath, 'entities', `${entityName}.ts`)
 
   try {
-    const entityPath = join(basePath, 'entities', `${entityName}.ts`)
     return jiti(entityPath)
-  } catch {
+  } catch (error) {
+    // Log error for debugging
+    console.error(`[jiti] Failed to load ${entityPath}:`)
+    console.error(error instanceof Error ? error.message : error)
+
+    // Try .tsx extension
+    const tsxPath = join(basePath, 'entities', `${entityName}.tsx`)
     try {
-      const entityPath = join(basePath, 'entities', `${entityName}.tsx`)
-      return jiti(entityPath)
-    } catch {
+      return jiti(tsxPath)
+    } catch (error2) {
+      console.error(`[jiti] Also failed to load ${tsxPath}:`)
+      console.error(error2 instanceof Error ? error2.message : error2)
       return null
     }
   }

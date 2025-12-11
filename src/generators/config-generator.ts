@@ -124,7 +124,7 @@ export class ConfigGenerator {
     }
     lines.push('let config: SyncConfig = {')
     lines.push("  electricUrl: '',")
-    lines.push("  apiUrl: import.meta.env?.VITE_API_URL ?? '/api/v1',")
+    lines.push("  apiUrl: (typeof process !== 'undefined' && process.env?.VITE_API_URL) || '/api/v1',")
     lines.push("  authTokenKey: 'auth_token',")
     lines.push("  defaultSyncMode: 'api',")
     lines.push('  entities: {')

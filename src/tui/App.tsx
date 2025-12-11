@@ -25,6 +25,7 @@ export interface AppProps {
   pageSize: number
   debug: boolean
   generatedDir: string
+  authToken?: string
 }
 
 // Create a QueryClient for TanStack Query integration
@@ -38,7 +39,7 @@ const queryClient = new QueryClient({
   },
 })
 
-function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug, generatedDir }: AppProps) {
+function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug, generatedDir, authToken }: AppProps) {
   const { exit } = useApp()
   const navigation = useNavigation(entity ? 'table' : 'entity-list')
   const [showHelp, setShowHelp] = useState(false)
@@ -112,7 +113,8 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug, generated
           <EntityTableView
             key={navigation.state.selectedEntity}
             entityName={navigation.state.selectedEntity}
-            generatedDir={generatedDir}
+            apiUrl={apiUrl}
+            authToken={authToken}
             pageSize={pageSize}
             onSelect={(row) => navigation.goToDetail(navigation.state.selectedEntity!, String(row.id || ''))}
             onBack={() => navigation.goBack()}
