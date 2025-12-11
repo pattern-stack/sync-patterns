@@ -29,44 +29,10 @@ export interface EntityMetadata {
 }
 
 /**
- * Common paths where generated entities might be located
- */
-const GENERATED_PATHS = [
-  'application/frontend/src/generated',   // Pattern Stack monorepo structure (check first)
-  'frontend/src/generated',               // Simple monorepo
-  'packages/frontend/src/generated',      // Nx/Turborepo style
-  'src/generated',                        // Default: standalone frontend (check last)
-]
-
-/**
- * Find the generated entities directory by checking common paths
- */
-async function findGeneratedDir(): Promise<string | null> {
-  for (const path of GENERATED_PATHS) {
-    const entitiesDir = join(process.cwd(), path, 'entities')
-    try {
-      await fs.access(entitiesDir)
-      return path
-    } catch {
-      // Try next path
-    }
-  }
-  return null
-}
-
-/**
  * Scan src/generated/entities/ directory to find all entity modules
  */
-export async function discoverEntities(generatedDir?: string): Promise<EntityMetadata[]> {
-  // If no dir provided, auto-detect
-  const resolvedDir = generatedDir || await findGeneratedDir()
-
-  if (!resolvedDir) {
-    // No entities directory found
-    return []
-  }
-
-  const entitiesDir = join(process.cwd(), resolvedDir, 'entities')
+export async function discoverEntities(generatedDir: string = 'src/generated'): Promise<EntityMetadata[]> {
+  const entitiesDir = join(process.cwd(), generatedDir, 'entities')
 
   try {
     // Check if entities directory exists

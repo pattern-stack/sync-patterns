@@ -20,39 +20,24 @@ export interface ExploreOptions {
   theme?: 'light' | 'dark' | 'auto'
   pageSize?: string
   debug?: boolean
-  list?: boolean
-  generatedDir?: string
 }
 
-/**
- * Common paths where generated entities might be located
- */
-const GENERATED_PATHS = [
-  'application/frontend/src/generated',   // Pattern Stack monorepo structure (check first)
-  'frontend/src/generated',               // Simple monorepo
-  'packages/frontend/src/generated',      // Nx/Turborepo style
-  'src/generated',                        // Default: standalone frontend (check last)
-]
-
-async function findGeneratedDir(): Promise<string | null> {
-  for (const path of GENERATED_PATHS) {
-    const entitiesDir = join(process.cwd(), path, 'entities')
-    try {
-      await fs.access(entitiesDir)
-      return path
-    } catch {
-      // Try next path
-    }
+async function checkGeneratedCode(outputDir: string): Promise<boolean> {
+  try {
+    await fs.access(outputDir)
+    return true
+  } catch {
+    return false
   }
-  return null
 }
 
 export async function exploreCommand(options: ExploreOptions): Promise<void> {
   try {
-    // Check if generated code exists (use provided path or auto-detect)
-    const generatedDir = options.generatedDir || await findGeneratedDir()
+    // Check if generated code exists
+    const generatedDir = join(process.cwd(), 'src', 'generated')
+    const hasGenerated = await checkGeneratedCode(generatedDir)
 
-    if (!generatedDir) {
+    if (!hasGenerated) {
       console.error('Error: Generated code not found')
       console.error('')
       console.error('The TUI Explorer requires generated code to function.')
@@ -65,32 +50,6 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
       console.error('  sync-patterns generate http://localhost:8000/openapi.json')
       console.error('')
       process.exit(1)
-    }
-
-    // List mode - just output entities without interactive TUI
-    if (options.list) {
-      const { discoverEntities } = await import('../../tui/utils/entity-discovery.js')
-      const entities = await discoverEntities(generatedDir)
-
-      if (entities.length === 0) {
-        console.log('No entities found in', generatedDir)
-      } else {
-        console.log(`Found ${entities.length} entities:\n`)
-        for (const entity of entities) {
-          const modeIcon = entity.syncMode === 'realtime' ? '●' : entity.syncMode === 'offline' ? '◐' : '○'
-          const ops = []
-          if (entity.operations.list) ops.push('list')
-          if (entity.operations.get) ops.push('get')
-          if (entity.operations.create) ops.push('create')
-          if (entity.operations.update) ops.push('update')
-          if (entity.operations.delete) ops.push('delete')
-          console.log(`  ${modeIcon} ${entity.displayName} (${entity.name})`)
-          console.log(`    Mode: ${entity.syncMode}`)
-          console.log(`    Operations: ${ops.join(', ') || 'none detected'}`)
-          console.log('')
-        }
-      }
-      process.exit(0)
     }
 
     // Validate pageSize if provided

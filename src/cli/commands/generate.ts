@@ -14,7 +14,6 @@ import { generateCollections } from '../../generators/collection-generator.js'
 import { generateEntityWrappers } from '../../generators/entity-generator.js'
 import { generateConfig } from '../../generators/config-generator.js'
 import { generateEntitiesHook } from '../../generators/entities-hook-generator.js'
-import { generateViews } from '../../generators/view-generator.js'
 
 export interface GenerateOptions {
   output: string
@@ -266,36 +265,6 @@ export async function generateCommand(
         const entitiesHook = generateEntitiesHook(parsed)
         await writeFile(join(options.output, 'entities-hook.tsx'), entitiesHook.code)
         console.log(`Written entities-hook.tsx to ${options.output}/`)
-
-        // Generate TUI views
-        console.log('\nGenerating TUI views...')
-        const views = generateViews(parsed)
-        const viewsDir = join(options.output, 'views')
-        await ensureDir(viewsDir)
-
-        // Write table views
-        for (const [name, content] of views.tableViews) {
-          const fileName = `${toKebabCase(name)}-table-view.tsx`
-          const filePath = join(viewsDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
-        // Write detail views
-        for (const [name, content] of views.detailViews) {
-          const fileName = `${toKebabCase(name)}-detail-view.tsx`
-          const filePath = join(viewsDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
-        // Write views index
-        await writeFile(join(viewsDir, 'index.tsx'), views.index)
-        console.log(`Written ${views.tableViews.size} table views and ${views.detailViews.size} detail views to ${viewsDir}/`)
       } else {
         console.log('  No entities with CRUD operations found')
       }
