@@ -121,3 +121,11 @@ export {
   type GeneratedEntitiesHook,
   type EntitiesHookGeneratorOptions,
 } from './entities-hook-generator.js'
+
+// View Generator (TUI views for entities)
+export {
+  ViewGenerator,
+  generateViews,
+  type GeneratedViews,
+  type ViewGeneratorOptions,
+} from './view-generator.js'

@@ -8,7 +8,11 @@ dist/
 # Test output
 test/output/
 test/real-output/
+test-output/
 coverage/
+
+# Generated code (output from sync-patterns generate)
+src/generated/
 
 # IDE
 .idea/

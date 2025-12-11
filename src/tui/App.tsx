@@ -7,11 +7,28 @@
 import React, { useState } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useNavigation } from './hooks/useNavigation'
-import { EntityList } from './components/EntityList'
-import Header from './components/Header'
-import StatusBar from './components/StatusBar'
-import HelpOverlay from './components/HelpOverlay'
+import { useNavigation } from './hooks/useNavigation.js'
+import { EntityList } from './components/EntityList.js'
+import Header from './components/Header.js'
+import StatusBar from './components/StatusBar.js'
+import HelpOverlay from './components/HelpOverlay.js'
+
+// Import generated views
+// If views don't exist yet, we'll gracefully handle in the component
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let tableViews: Record<string, React.ComponentType<any>> | undefined
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let detailViews: Record<string, React.ComponentType<any>> | undefined
+
+try {
+  // @ts-expect-error - views may not exist yet during initial build
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const viewsModule = require('../generated/views/index.js')
+  tableViews = viewsModule.tableViews
+  detailViews = viewsModule.detailViews
+} catch {
+  // Views not generated yet - will render empty state
+}
 
 export interface AppProps {
   entity?: string
@@ -36,7 +53,7 @@ const queryClient = new QueryClient({
   },
 })
 
-function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProps) {
+function AppContent({ entity, apiUrl, mode, pageSize }: AppProps) {
   const { exit } = useApp()
   const navigation = useNavigation(entity ? 'table' : 'entity-list')
   const [showHelp, setShowHelp] = useState(false)
@@ -102,49 +119,64 @@ function AppContent({ entity, apiUrl, recordId, mode, pageSize, debug }: AppProp
           <EntityList onSelect={handleEntitySelect} onBack={handleEntityListBack} />
         )}
 
-        {navigation.state.view === 'table' && (
-          <Box flexDirection="column" padding={2}>
-            <Box marginBottom={1}>
-              <Text bold color="cyan">
-                Entity: {navigation.state.selectedEntity}
-              </Text>
-            </Box>
-            <Box marginBottom={2}>
-              <Text color="yellow">Table view coming in Issue 4 (DataTable Component)</Text>
-            </Box>
-            {debug && (
-              <Box marginBottom={2} borderStyle="single" borderColor="yellow" padding={1}>
-                <Box flexDirection="column">
-                  <Text bold color="yellow">Debug Info</Text>
-                  <Text dimColor>Entity: {navigation.state.selectedEntity}</Text>
-                  <Text dimColor>API URL: {apiUrl}</Text>
-                  <Text dimColor>Mode: {mode || 'auto'}</Text>
-                  <Text dimColor>Page Size: {pageSize}</Text>
-                  {recordId && <Text dimColor>Record ID: {recordId}</Text>}
-                </Box>
-              </Box>
-            )}
-            <Box>
-              <Text dimColor>Press Esc to go back to entity list</Text>
-            </Box>
-          </Box>
-        )}
+        {navigation.state.view === 'table' && navigation.state.selectedEntity && (() => {
+          const TableView = tableViews?.[navigation.state.selectedEntity!]
 
-        {navigation.state.view === 'detail' && (
-          <Box flexDirection="column" padding={2}>
-            <Box marginBottom={1}>
-              <Text bold color="cyan">
-                Detail: {navigation.state.selectedEntity}
+          if (TableView) {
+            // Use generated view component
+            return (
+              <TableView
+                onSelect={(row) => navigation.goToDetail(navigation.state.selectedEntity!, String(row.id || ''))}
+                onBack={() => navigation.goBack()}
+                pageSize={pageSize}
+              />
+            )
+          }
+
+          // Fallback to empty DataTable if view not generated
+          return (
+            <Box flexDirection="column" padding={2}>
+              <Text color="yellow">
+                No generated view for {navigation.state.selectedEntity}
               </Text>
+              <Text dimColor>
+                Run: sync-patterns generate &lt;spec&gt; --output src/generated --entities
+              </Text>
+              <Box marginTop={1}>
+                <Text dimColor>Press Esc to go back</Text>
+              </Box>
             </Box>
-            <Box marginBottom={2}>
-              <Text color="yellow">Detail view coming in Issue 5 (DetailView Component)</Text>
+          )
+        })()}
+
+        {navigation.state.view === 'detail' && navigation.state.selectedEntity && navigation.state.selectedRecordId && (() => {
+          const DetailViewComponent = detailViews?.[navigation.state.selectedEntity!]
+
+          if (DetailViewComponent) {
+            // Use generated view component
+            return (
+              <DetailViewComponent
+                id={navigation.state.selectedRecordId}
+                onBack={() => navigation.goBack()}
+              />
+            )
+          }
+
+          // Fallback to empty detail view if not generated
+          return (
+            <Box flexDirection="column" padding={2}>
+              <Text color="yellow">
+                No generated detail view for {navigation.state.selectedEntity}
+              </Text>
+              <Text dimColor>
+                Run: sync-patterns generate &lt;spec&gt; --output src/generated --entities
+              </Text>
+              <Box marginTop={1}>
+                <Text dimColor>Press b or Esc to go back</Text>
+              </Box>
             </Box>
-            <Box>
-              <Text dimColor>Press Esc to go back to table</Text>
-            </Box>
-          </Box>
-        )}
+          )
+        })()}
       </Box>
 
       {/* Footer / Status Bar */}
