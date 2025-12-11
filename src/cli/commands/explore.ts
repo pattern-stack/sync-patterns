@@ -8,6 +8,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { render } from 'ink'
 import React from 'react'
+import { getTokenForUrl } from '../utils/auth-config.js'
 
 export interface ExploreOptions {
   entity?: string
@@ -22,6 +23,7 @@ export interface ExploreOptions {
   debug?: boolean
   generatedDir?: string
   list?: boolean
+  token?: string
 }
 
 async function checkGeneratedCode(outputDir: string): Promise<boolean> {
@@ -135,11 +137,26 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
     // Dynamic import of App component (will be created next)
     const { default: App } = await import('../../tui/App.js')
 
+    // Get auth token: flag > env > saved config
+    const apiUrl = options.apiUrl || process.env.SYNC_PATTERNS_API_URL
+    if (!apiUrl) {
+      console.error('Error: --api-url is required (or set SYNC_PATTERNS_API_URL)')
+      process.exit(1)
+    }
+    let authToken = options.token || process.env.SYNC_PATTERNS_AUTH_TOKEN
+
+    if (!authToken) {
+      authToken = await getTokenForUrl(apiUrl) || undefined
+      if (authToken && options.debug) {
+        console.log(`Using saved token for ${apiUrl}`)
+      }
+    }
+
     // Render the TUI
     const { unmount, waitUntilExit } = render(
       React.createElement(App, {
         entity: options.entity,
-        apiUrl: options.apiUrl || process.env.SYNC_PATTERNS_API_URL || 'http://localhost:8000/api/v1',
+        apiUrl,
         recordId: options.id,
         mode: options.mode,
         noCache: options.noCache || false,
@@ -148,6 +165,7 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
         pageSize: options.pageSize ? parseInt(options.pageSize, 10) : 25,
         debug: options.debug || false,
         generatedDir,
+        authToken,
       })
     )
 

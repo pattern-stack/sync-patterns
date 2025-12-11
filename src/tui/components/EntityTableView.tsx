@@ -1,138 +1,120 @@
 /**
  * EntityTableView Component
  *
- * Dynamically loads generated hooks and renders data in a DataTable.
- * Uses jiti to load TypeScript modules from the user's project.
+ * Fetches entity data via direct API calls and renders in a DataTable.
+ * Uses the generated API client for data fetching.
  */
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
-import { loadEntityModule } from '../utils/generated-loader.js'
 import DataTable from './DataTable.js'
 
 export interface EntityTableViewProps {
   entityName: string
-  generatedDir: string
+  apiUrl: string
+  authToken?: string
   pageSize: number
   onSelect: (row: Record<string, unknown>) => void
   onBack: () => void
 }
 
-/**
- * Convert entity name to PascalCase singular
- * accounts -> Account
- */
-function toPascalSingular(name: string): string {
-  let singular = name
-  if (singular.endsWith('ies')) {
-    singular = singular.slice(0, -3) + 'y'
-  } else if (singular.endsWith('ses') || singular.endsWith('shes') || singular.endsWith('ches') || singular.endsWith('xes')) {
-    singular = singular.slice(0, -2)
-  } else if (singular.endsWith('s') && !singular.endsWith('ss')) {
-    singular = singular.slice(0, -1)
-  }
-  return singular
-    .split(/[-_]/)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join('')
+interface FetchState {
+  data: Record<string, unknown>[]
+  columns: { key: string; label: string }[]
+  isLoading: boolean
+  error: Error | null
 }
 
 export function EntityTableView({
   entityName,
-  generatedDir,
+  apiUrl,
+  authToken,
   pageSize,
   onSelect,
   onBack,
 }: EntityTableViewProps) {
-  // Load the entity module dynamically
-  const entityModule = loadEntityModule(generatedDir, entityName)
+  const [state, setState] = useState<FetchState>({
+    data: [],
+    columns: [],
+    isLoading: true,
+    error: null,
+  })
 
-  if (!entityModule) {
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setState(s => ({ ...s, isLoading: true, error: null }))
+
+        // Build headers with optional auth
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        }
+        if (authToken) {
+          headers['Authorization'] = `Bearer ${authToken}`
+        }
+
+        // Fetch data and metadata in parallel
+        const [dataRes, metaRes] = await Promise.all([
+          fetch(`${apiUrl}/${entityName}`, { headers }),
+          fetch(`${apiUrl}/${entityName}/fields/metadata?view=list`, { headers }).catch(() => null),
+        ])
+
+        if (!dataRes.ok) {
+          throw new Error(`Failed to fetch ${entityName}: ${dataRes.status}`)
+        }
+
+        const dataJson = await dataRes.json()
+        const data = dataJson.items ?? dataJson.data ?? dataJson
+
+        // Parse metadata if available
+        let columns: { key: string; label: string }[] = []
+        if (metaRes?.ok) {
+          const metaJson = await metaRes.json()
+          // Metadata uses 'field' not 'key' - filter to primary/secondary importance for list view
+          const allColumns = metaJson.columns ?? []
+          const listColumns = allColumns.filter((col: { importance?: string }) =>
+            col.importance === 'primary' || col.importance === 'secondary'
+          ).slice(0, 6) // Limit to 6 columns for TUI
+          columns = listColumns.map((col: { field?: string; key?: string; label?: string }) => ({
+            key: col.field ?? col.key ?? '',
+            label: col.label ?? col.field ?? col.key ?? '',
+          }))
+        } else if (Array.isArray(data) && data.length > 0) {
+          // Fallback: derive columns from first row
+          columns = Object.keys(data[0]).map(key => ({ key, label: key }))
+        }
+
+        setState({ data, columns, isLoading: false, error: null })
+      } catch (err) {
+        setState(s => ({
+          ...s,
+          isLoading: false,
+          error: err instanceof Error ? err : new Error(String(err)),
+        }))
+      }
+    }
+
+    fetchData()
+  }, [apiUrl, entityName])
+
+  if (state.error) {
     return (
       <Box flexDirection="column" padding={2}>
-        <Text color="red">Failed to load entity module: {entityName}</Text>
-        <Text dimColor>
-          Make sure you have run: sync-patterns generate {'<spec>'} --output {generatedDir}
-        </Text>
+        <Text color="red">Error loading {entityName}:</Text>
+        <Text color="red">{state.error.message}</Text>
+        <Box marginTop={1}>
+          <Text dimColor>Press Esc to go back</Text>
+        </Box>
       </Box>
     )
   }
 
-  // Find the WithMeta hook (e.g., useAccountsWithMeta)
-  const pascalName = toPascalSingular(entityName)
-  const hookName = `use${pascalName}sWithMeta`
-  const useListWithMeta = entityModule[hookName]
-
-  if (!useListWithMeta) {
-    // Fallback to regular list hook
-    const fallbackHookName = `use${pascalName}s`
-    const useList = entityModule[fallbackHookName]
-
-    if (!useList) {
-      return (
-        <Box flexDirection="column" padding={2}>
-          <Text color="red">No list hook found for {entityName}</Text>
-          <Text dimColor>Expected: {hookName} or {fallbackHookName}</Text>
-        </Box>
-      )
-    }
-
-    // Use the fallback hook without metadata
-    return <EntityTableWithHook
-      entityName={entityName}
-      useListHook={useList}
-      hasMetadata={false}
-      pageSize={pageSize}
-      onSelect={onSelect}
-      onBack={onBack}
-    />
-  }
-
-  return <EntityTableWithHook
-    entityName={entityName}
-    useListHook={useListWithMeta}
-    hasMetadata={true}
-    pageSize={pageSize}
-    onSelect={onSelect}
-    onBack={onBack}
-  />
-}
-
-interface EntityTableWithHookProps {
-  entityName: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useListHook: () => any
-  hasMetadata: boolean
-  pageSize: number
-  onSelect: (row: Record<string, unknown>) => void
-  onBack: () => void
-}
-
-/**
- * Inner component that actually calls the hook.
- * Separated so the hook call is at the top level of a component.
- */
-function EntityTableWithHook({
-  entityName,
-  useListHook,
-  hasMetadata,
-  pageSize,
-  onSelect,
-  onBack,
-}: EntityTableWithHookProps) {
-  // Call the hook
-  const result = useListHook()
-
-  const data = result.data ?? []
-  const columns = hasMetadata ? (result.columns ?? []) : []
-  const isLoading = hasMetadata ? !result.isReady : result.isLoading
-
   return (
     <DataTable
       entityName={entityName}
-      data={data}
-      columns={columns}
-      loading={isLoading}
+      data={state.data}
+      columns={state.columns}
+      loading={state.isLoading}
       pageSize={pageSize}
       onSelect={onSelect}
       onBack={onBack}

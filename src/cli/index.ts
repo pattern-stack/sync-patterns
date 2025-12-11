@@ -8,6 +8,7 @@ import { Command } from 'commander'
 import { generateCommand } from './commands/generate.js'
 import { schemaCheckCommand } from './commands/schema-check.js'
 import { exploreCommand } from './commands/explore.js'
+import { loginCommand } from './commands/login.js'
 
 const program = new Command()
 
@@ -76,8 +77,8 @@ program
   .option('--id <id>', 'Open specific record detail')
   .option(
     '--api-url <url>',
-    'Backend API URL',
-    process.env.SYNC_PATTERNS_API_URL || 'http://localhost:8000/api/v1'
+    'Backend API URL (or set SYNC_PATTERNS_API_URL)',
+    process.env.SYNC_PATTERNS_API_URL
   )
   .option('--mode <mode>', 'Force sync mode (optimistic|confirmed)')
   .option('--no-cache', 'Disable caching')
@@ -88,7 +89,21 @@ program
   .option('--debug', 'Enable debug logging')
   .option('--generated-dir <path>', 'Path to generated code directory')
   .option('--list', 'List discovered entities and exit')
+  .option('--token <token>', 'Auth token (or set SYNC_PATTERNS_AUTH_TOKEN)')
   .action(exploreCommand)
+
+// Login command
+program
+  .command('login')
+  .description('Authenticate with API and save token')
+  .requiredOption(
+    '--api-url <url>',
+    'Backend API URL (or set SYNC_PATTERNS_API_URL)',
+    process.env.SYNC_PATTERNS_API_URL
+  )
+  .option('--email <email>', 'Email address (will prompt if not provided)')
+  .option('--logout', 'Clear saved token for this API URL')
+  .action(loginCommand)
 
 // Help command
 program
