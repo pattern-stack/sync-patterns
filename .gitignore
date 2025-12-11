@@ -39,3 +39,6 @@ pnpm-lock.yaml
 # Misc
 *.tgz
 .turbo/
+
+# Generated code (output from sync-patterns generate)
+src/generated/
