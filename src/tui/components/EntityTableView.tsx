@@ -3,11 +3,14 @@
  *
  * Fetches entity data via direct API calls and renders in a DataTable.
  * Uses the generated API client for data fetching.
+ * Extracts UIType from metadata for proper rendering and column sizing.
  */
 
 import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
-import DataTable from './DataTable.js'
+import DataTable, { type Column } from './DataTable.js'
+import type { UIType } from '../renderers/index.js'
+import { inferUIType } from '../utils/column-sizing.js'
 
 export interface EntityTableViewProps {
   entityName: string
@@ -18,9 +21,19 @@ export interface EntityTableViewProps {
   onBack: () => void
 }
 
+/** Raw metadata column from API */
+interface MetadataColumn {
+  field?: string
+  key?: string
+  label?: string
+  type?: string  // UIType from backend
+  importance?: string
+  format?: Record<string, unknown>
+}
+
 interface FetchState {
   data: Record<string, unknown>[]
-  columns: { key: string; label: string }[]
+  columns: Column[]
   isLoading: boolean
   error: Error | null
 }
@@ -67,21 +80,44 @@ export function EntityTableView({
         const data = dataJson.items ?? dataJson.data ?? dataJson
 
         // Parse metadata if available
-        let columns: { key: string; label: string }[] = []
+        let columns: Column[] = []
         if (metaRes?.ok) {
           const metaJson = await metaRes.json()
           // Metadata uses 'field' not 'key' - filter to primary/secondary importance for list view
-          const allColumns = metaJson.columns ?? []
-          const listColumns = allColumns.filter((col: { importance?: string }) =>
+          const allColumns: MetadataColumn[] = metaJson.columns ?? []
+          const listColumns = allColumns.filter((col) =>
             col.importance === 'primary' || col.importance === 'secondary'
           ).slice(0, 6) // Limit to 6 columns for TUI
-          columns = listColumns.map((col: { field?: string; key?: string; label?: string }) => ({
-            key: col.field ?? col.key ?? '',
-            label: col.label ?? col.field ?? col.key ?? '',
-          }))
+
+          // Get sample row for value-based type inference
+          const sampleRow = Array.isArray(data) && data.length > 0 ? data[0] : {}
+
+          columns = listColumns.map((col) => {
+            const fieldKey = col.field ?? col.key ?? ''
+            const sampleValue = sampleRow[fieldKey]
+
+            // Use metadata type if provided, otherwise infer from field name + value
+            const uiType: UIType = (col.type as UIType) ?? inferUIType(fieldKey, sampleValue)
+
+            return {
+              key: fieldKey,
+              label: col.label ?? fieldKey,
+              uiType,
+              format: col.format,
+              importance: mapImportance(col.importance),
+            }
+          })
         } else if (Array.isArray(data) && data.length > 0) {
-          // Fallback: derive columns from first row
-          columns = Object.keys(data[0]).map(key => ({ key, label: key }))
+          // Fallback: derive columns from first row with smart type inference
+          const firstRow = data[0]
+          const keys = Object.keys(firstRow).slice(0, 6)
+
+          columns = keys.map((key) => ({
+            key,
+            label: formatLabel(key),
+            uiType: inferUIType(key, firstRow[key]),
+            importance: 0,
+          }))
         }
 
         setState({ data, columns, isLoading: false, error: null })
@@ -95,7 +131,7 @@ export function EntityTableView({
     }
 
     fetchData()
-  }, [apiUrl, entityName])
+  }, [apiUrl, entityName, authToken])
 
   if (state.error) {
     return (
@@ -120,6 +156,38 @@ export function EntityTableView({
       onBack={onBack}
     />
   )
+}
+
+/**
+ * Map importance string to numeric value for sorting
+ */
+function mapImportance(importance?: string): number {
+  switch (importance) {
+    case 'primary':
+    case 'critical':
+    case 'high':
+      return 3
+    case 'secondary':
+    case 'medium':
+      return 2
+    case 'tertiary':
+    case 'low':
+    case 'minimal':
+      return 1
+    default:
+      return 0
+  }
+}
+
+/**
+ * Format a field key as a human-readable label
+ */
+function formatLabel(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+    .replace(/^\w/, (c) => c.toUpperCase())
 }
 
 export default EntityTableView

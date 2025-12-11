@@ -4,7 +4,7 @@
  * Displays entity records in a tabular format with:
  * - Column headers with field names
  * - Field-aware rendering using UIType renderers
- * - Smart column width calculation
+ * - Smart column width calculation based on UIType
  * - Pagination controls
  * - Keyboard navigation
  * - Loading and error states
@@ -14,6 +14,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import chalk from 'chalk'
 import { renderField, type UIType, type FieldFormat } from '../renderers/index.js'
+import { calculateColumnWidths, inferUIType, truncateUUID } from '../utils/column-sizing.js'
 import LoadingView from './LoadingView'
 import ErrorView from './ErrorView'
 
@@ -96,14 +97,14 @@ export default function DataTable({
       return []
     }
 
-    // Infer from first record
+    // Infer from first record with smart type detection
     const firstRecord = data[0]
     const keys = Object.keys(firstRecord).slice(0, 6) // Limit to 6 columns
 
     return keys.map((key) => ({
       key,
       label: formatLabel(key),
-      uiType: inferUIType(firstRecord[key]),
+      uiType: inferUIType(key, firstRecord[key]),
       importance: 0,
     }))
   }, [providedColumns, data])
@@ -111,17 +112,25 @@ export default function DataTable({
   // Limit to 5-6 most important columns
   const visibleColumns = columns.slice(0, 6)
 
-  // Calculate column widths based on terminal width
-  // Assuming 80+ column terminal, distribute width
+  // Calculate column widths based on UIType and terminal width
   const columnWidths = useMemo(() => {
-    const terminalWidth = process.stdout.columns || 80
-    const totalBorders = visibleColumns.length + 1 // Border chars
-    const totalSpacing = visibleColumns.length * 2 // Padding
-    const availableWidth = terminalWidth - totalBorders - totalSpacing - 4 // Extra margin
+    const terminalWidth = process.stdout.columns || 120
 
-    const baseWidth = Math.floor(availableWidth / visibleColumns.length)
+    // Prepare columns with UIType for smart sizing
+    const columnsWithTypes = visibleColumns.map((col) => ({
+      key: col.key,
+      uiType: col.uiType || 'text',
+    }))
 
-    return visibleColumns.map((col) => col.width || baseWidth)
+    // If explicit widths provided, use them; otherwise calculate
+    const hasExplicitWidths = visibleColumns.some((col) => col.width)
+    if (hasExplicitWidths) {
+      const availableWidth = terminalWidth - visibleColumns.length * 2 - 4
+      const baseWidth = Math.floor(availableWidth / visibleColumns.length)
+      return visibleColumns.map((col) => col.width || baseWidth)
+    }
+
+    return calculateColumnWidths(columnsWithTypes, terminalWidth)
   }, [visibleColumns])
 
   // Reset selected row when page changes
@@ -247,19 +256,26 @@ export default function DataTable({
         {/* Data Rows */}
         {pageData.map((row, rowIdx) => {
           const isSelected = rowIdx === selectedRow
-          const bgColor = isSelected ? 'bgBlue' : undefined
 
           return (
             <Box key={`row-${rowIdx}`}>
               {visibleColumns.map((col, colIdx) => {
                 const value = row[col.key]
-                const rendered = renderField(value, col.uiType || 'text', col.format)
+                const uiType = col.uiType || 'text'
+
+                // For entity/user types with UUID values, truncate the UUID
+                let displayValue = value
+                if ((uiType === 'entity' || uiType === 'user') && typeof value === 'string') {
+                  displayValue = truncateUUID(value)
+                }
+
+                const rendered = renderField(displayValue, uiType, col.format)
                 const truncated = truncate(stripAnsi(rendered), columnWidths[colIdx] - 2)
 
                 return (
                   <Box key={`cell-${rowIdx}-${col.key}`} width={columnWidths[colIdx]} paddingX={1}>
                     {isSelected ? (
-                      <Text {...{ [bgColor as string]: true }}>{truncated}</Text>
+                      <Text inverse color="cyan">{truncated}</Text>
                     ) : (
                       <Text>{truncated}</Text>
                     )}
@@ -295,23 +311,6 @@ function formatLabel(key: string): string {
     .replace(/([A-Z])/g, ' $1')
     .trim()
     .replace(/^\w/, (c) => c.toUpperCase())
-}
-
-/**
- * Infer UIType from value
- */
-function inferUIType(value: unknown): UIType {
-  if (value === null || value === undefined) return 'text'
-  if (typeof value === 'boolean') return 'boolean'
-  if (typeof value === 'number') return 'number'
-  if (typeof value === 'string') {
-    // Basic inference
-    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return 'datetime'
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'date'
-    if (/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return 'email'
-    if (/^https?:\/\//.test(value)) return 'url'
-  }
-  return 'text'
 }
 
 /**

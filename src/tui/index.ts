@@ -9,3 +9,4 @@ export * from './renderers/index.js';
 
 // Export utilities
 export * from './utils/terminal.js';
+export * from './utils/column-sizing.js';
