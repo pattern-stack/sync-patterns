@@ -1,8 +1,9 @@
 /**
  * Core Module
  *
- * Entity model and resolver for the new generator architecture.
+ * Entity model, resolver, and generators for the new architecture.
  */
 
 export * from './entity-model.js'
 export * from './entity-resolver.js'
+export * from './api-generator.js'
