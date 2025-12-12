@@ -7,3 +7,4 @@
 export * from './entity-model.js'
 export * from './entity-resolver.js'
 export * from './api-generator.js'
+export * from './hook-generator.js'
