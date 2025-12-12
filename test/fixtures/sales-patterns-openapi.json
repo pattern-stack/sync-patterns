@@ -1,0 +1,4266 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DealBrain API",
+    "description": "Sales CRM powered by Pattern Stack",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Health check endpoint.\n\nReturns:\n    Dictionary with service health status",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Ready",
+        "description": "Readiness check endpoint.\n\nChecks database connectivity, Pattern Stack module availability,\nand optional cache connectivity to determine if the service is ready\nto accept traffic.\n\nReturns:\n    Dictionary with readiness status and individual check results:\n    - database: Database connectivity status\n    - dependencies: Pattern Stack modules availability\n    - cache: Cache connectivity status (optional, None if not configured)\n\nResponse codes:\n    200: All required checks pass, service is ready\n    503: One or more required checks failed, service is not ready",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/fields/": {
+      "get": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "List Field Definitions",
+        "description": "List field definitions for this entity type.\n\nArgs:\n    source_type: Filter by source type (org, user, external)\n    source_id: Filter by source ID\n    is_active: Filter by active status (default: True)\n    db: Database session\n\nReturns:\n    List of field definitions",
+        "operationId": "list_field_definitions_api_v1_accounts_fields__get",
+        "parameters": [
+          {
+            "name": "source_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "is_active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Is Active"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FieldDefinitionResponse"
+                  },
+                  "title": "Response List Field Definitions Api V1 Accounts Fields  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "Create Field Definition",
+        "description": "Create a new field definition.\n\nArgs:\n    data: Field definition creation data\n    db: Database session\n\nReturns:\n    Created field definition\n\nRaises:\n    HTTPException: If entity_type doesn't match or constraint violated",
+        "operationId": "create_field_definition_api_v1_accounts_fields__post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldDefinitionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldDefinitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/fields/metadata": {
+      "get": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "Get Extended Metadata Auth",
+        "description": "Get extended column metadata including custom fields (authenticated).\n\nUses FieldRegistry to aggregate system fields and custom field definitions.\nSystem field introspection (from column.info['ui'] metadata) is only available\nwhen a model_class was provided during router creation via create_field_router().\n\nAuthentication is required. The user's org_id and user_id are automatically\nextracted from the authenticated user context. Query parameters can override\nthese values if provided.\n\nArgs:\n    source_id: Organization ID (optional, defaults to user's org_id)\n    user_id: User ID for user-specific fields (optional, defaults to user's id)\n    integration_types: Comma-separated list of integration types (optional)\n    view: View context (default: \"list\")\n    db: Database session\n    current_user: Authenticated user from auth dependency\n\nReturns:\n    Extended column metadata with custom fields grouped by source\n\nRaises:\n    HTTPException: If source_id or user_id format is invalid",
+        "operationId": "get_extended_metadata_auth_api_v1_accounts_fields_metadata_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "integration_types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Integration Types"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "list",
+              "title": "View"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtendedColumnMetadataResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/fields/{field_id}": {
+      "get": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "Get Field Definition",
+        "description": "Get a specific field definition.\n\nArgs:\n    field_id: Field definition ID\n    db: Database session\n\nReturns:\n    Field definition\n\nRaises:\n    HTTPException: If field not found or invalid ID format",
+        "operationId": "get_field_definition_api_v1_accounts_fields__field_id__get",
+        "parameters": [
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldDefinitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "Update Field Definition",
+        "description": "Update a field definition.\n\nArgs:\n    field_id: Field definition ID\n    data: Field definition update data\n    db: Database session\n\nReturns:\n    Updated field definition\n\nRaises:\n    HTTPException: If field not found or invalid ID format",
+        "operationId": "update_field_definition_api_v1_accounts_fields__field_id__patch",
+        "parameters": [
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldDefinitionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldDefinitionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Account Fields"
+        ],
+        "summary": "Deactivate Field Definition",
+        "description": "Deactivate (soft delete) a field definition.\n\nArgs:\n    field_id: Field definition ID\n    db: Database session\n\nRaises:\n    HTTPException: If field not found or invalid ID format",
+        "operationId": "deactivate_field_definition_api_v1_accounts_fields__field_id__delete",
+        "parameters": [
+          {
+            "name": "field_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login with email and password",
+        "description": "Authenticate user with email and password credentials.",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register new user",
+        "description": "Create a new user account with email and password.",
+        "operationId": "register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Registration successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid registration data"
+          },
+          "409": {
+            "description": "Email already registered"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Refresh access token",
+        "description": "Exchange a refresh token for a new access token.",
+        "operationId": "refresh_api_v1_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Token refreshed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired refresh token"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get current user",
+        "description": "Get the currently authenticated user's profile.",
+        "operationId": "get_me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Current user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated or invalid token"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/accounts/stages": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get Stage Metadata",
+        "description": "Get complete stage configuration from Account model Pattern.\n\nReturns all possible stages, initial stage, and the state machine\ntransition rules. This metadata is pulled directly from the Account\nmodel's EventPattern configuration.\n\nReturns:\n    StageMetadataResponse: Complete stage configuration",
+        "operationId": "get_stage_metadata_api_v1_accounts_stages_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageMetadataResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Create Account",
+        "description": "Create new account.\n\nArgs:\n    data: Account creation data\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    AccountResponse: Created account (as dict from facade)\n\nRaises:\n    HTTPException: 400 on validation error",
+        "operationId": "create_account_api_v1_accounts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOwner"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "List Accounts",
+        "description": "List accounts with filtering and pagination.\n\nArgs:\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n    offset: Pagination offset\n    limit: Pagination limit\n    stage: Optional stage filter\n    is_active: Optional active status filter\n\nReturns:\n    AccountListResponse: Paginated account list",
+        "operationId": "list_accounts_api_v1_accounts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Pagination limit",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Pagination limit"
+          },
+          {
+            "name": "stage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by stage",
+              "title": "Stage"
+            },
+            "description": "Filter by stage"
+          },
+          {
+            "name": "is_active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by active deals",
+              "title": "Is Active"
+            },
+            "description": "Filter by active deals"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/{account_id}": {
+      "delete": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Archive Account",
+        "description": "Archive account (soft delete).\n\nArgs:\n    account_id: Account UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner",
+        "operationId": "archive_account_api_v1_accounts__account_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get Account Full Context",
+        "description": "Get account with full context (activities, memories, pending updates).\n\nArgs:\n    account_id: Account UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    AccountFullContext: Account with all related data\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner",
+        "operationId": "get_account_full_context_api_v1_accounts__account_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountFullContext"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Update Account With Tracking",
+        "description": "Update account fields with automatic activity logging.\n\nArgs:\n    account_id: Account UUID\n    data: Fields to update\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    AccountWithTracking: Updated account with tracked changes\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner",
+        "operationId": "update_account_with_tracking_api_v1_accounts__account_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountWithTracking"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/{account_id}/stages/allowed": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get Allowed Stage Transitions",
+        "description": "Get valid stage transitions for this specific account's current state.\n\nUses the account's current stage and the EventPattern state machine\nto return only the stages this account can transition to right now.\n\nArgs:\n    account_id: Account UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    list[str]: Valid stage transitions for current state\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner",
+        "operationId": "get_allowed_stage_transitions_api_v1_accounts__account_id__stages_allowed_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Allowed Stage Transitions Api V1 Accounts  Account Id  Stages Allowed Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/{account_id}/stages/next": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Get Next Stage Suggestion",
+        "description": "Get AI/rule-based suggestion for the next logical stage.\n\nUses business logic to suggest the most appropriate next stage\nfrom the allowed transitions. Current logic prefers forward\nprogression (qualifying \u2192 presenting \u2192 closing \u2192 closed_won).\n\nFuture enhancements will use AI to analyze:\n- Activity count and recency\n- Deal value and score\n- Time in current stage\n- Conversation history\n\nArgs:\n    account_id: Account UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    Suggested next stage, or null if in terminal state\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner",
+        "operationId": "get_next_stage_suggestion_api_v1_accounts__account_id__stages_next_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get Next Stage Suggestion Api V1 Accounts  Account Id  Stages Next Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/accounts/{account_id}/stage": {
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "summary": "Transition Account Stage",
+        "description": "Transition account to new stage with activity logging.\n\nTo see valid transitions for this account's current state, call\nGET /{account_id}/stages/allowed first.\n\nArgs:\n    account_id: Account UUID\n    data: Stage transition data\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    account_api: Account API facade\n\nReturns:\n    AccountResponse: Updated account\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not owner, 400 if invalid transition",
+        "operationId": "transition_account_stage_api_v1_accounts__account_id__stage_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StageTransitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOwner"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "offline"
+    },
+    "/api/v1/activities": {
+      "post": {
+        "tags": [
+          "activities"
+        ],
+        "summary": "Create Activity",
+        "description": "Create new activity (polymorphic: voice/file/text/meeting).\n\nSupports all activity types via discriminated union:\n- Voice: Call recordings with transcripts\n- File: Document uploads with metadata\n- Text: Notes and comments\n- Meeting: Meeting logs with attendees\n\nSystem activities are internal-only (not exposed via API).\n\nArgs:\n    data: Activity creation data (type-specific schema)\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    activity_api: Activity API facade\n\nReturns:\n    ActivityResponse: Created activity (as dict from facade)\n\nRaises:\n    HTTPException: 404 if account not found, 403 if not authorized, 400 on validation error",
+        "operationId": "create_activity_api_v1_activities_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/VoiceActivityCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FileActivityCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TextActivityCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MeetingActivityCreate"
+                  }
+                ],
+                "title": "Data"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityOwner"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "activities"
+        ],
+        "summary": "List Activities",
+        "description": "List activities with filtering and pagination.\n\nFilters by account ownership - users can only see activities for accounts they own.\n\nArgs:\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    activity_api: Activity API facade\n    account_id: Optional account ID filter\n    type: Optional activity type filter\n    occurred_after: Optional date range start\n    occurred_before: Optional date range end\n    offset: Pagination offset\n    limit: Pagination limit (max 1000)\n\nReturns:\n    ActivityListResponse: Paginated activity list\n\nRaises:\n    HTTPException: 403 if account not owned by user",
+        "operationId": "list_activities_api_v1_activities_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by account ID",
+              "title": "Account Id"
+            },
+            "description": "Filter by account ID"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by activity type (voice/file/text/meeting/system)",
+              "title": "Type"
+            },
+            "description": "Filter by activity type (voice/file/text/meeting/system)"
+          },
+          {
+            "name": "occurred_after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter activities after this date",
+              "title": "Occurred After"
+            },
+            "description": "Filter activities after this date"
+          },
+          {
+            "name": "occurred_before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter activities before this date",
+              "title": "Occurred Before"
+            },
+            "description": "Filter activities before this date"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Pagination limit",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Pagination limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/activities/search": {
+      "get": {
+        "tags": [
+          "activities"
+        ],
+        "summary": "Search Activities",
+        "description": "Full-text search across activity content.\n\nSearches activity titles, content, and searchable metadata using PostgreSQL full-text search.\nResults are filtered by account ownership automatically.\n\nArgs:\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    activity_api: Activity API facade\n    query: Search query string (minimum 1 character)\n    account_id: Optional account ID filter\n    offset: Pagination offset\n    limit: Pagination limit (max 1000)\n\nReturns:\n    ActivityListResponse: Matching activities with pagination\n\nRaises:\n    HTTPException: 400 if query empty, 403 if account not owned by user",
+        "operationId": "search_activities_api_v1_activities_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Search query (searches title, content, metadata)",
+              "title": "Query"
+            },
+            "description": "Search query (searches title, content, metadata)"
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional account ID filter",
+              "title": "Account Id"
+            },
+            "description": "Optional account ID filter"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Pagination limit",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Pagination limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/activities/{activity_id}": {
+      "get": {
+        "tags": [
+          "activities"
+        ],
+        "summary": "Get Activity",
+        "description": "Get single activity by ID.\n\nVerifies user owns the account associated with this activity.\n\nArgs:\n    activity_id: Activity UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    activity_api: Activity API facade\n\nReturns:\n    ActivityResponse: Activity data (as dict from facade)\n\nRaises:\n    HTTPException: 404 if activity not found, 403 if not authorized",
+        "operationId": "get_activity_api_v1_activities__activity_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "activity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Activity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityOwner"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/files/upload": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Upload File",
+        "description": "Upload file via multipart form.\n\nArgs:\n    file: File to upload (multipart)\n    owner_type: Entity type that owns this file\n    owner_id: Owner entity UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    file_api: File API facade\n\nReturns:\n    FileResponse: Created file record\n\nRaises:\n    HTTPException: 403 if not authorized, 415 if invalid content type,\n                  413 if file too large or quota exceeded",
+        "operationId": "upload_file_api_v1_files_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_file_api_v1_files_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "x-sync-mode": "api"
+    },
+    "/api/v1/files/{file_id}": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Download File",
+        "description": "Download file (streaming response).\n\nArgs:\n    file_id: File UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    file_api: File API facade\n\nReturns:\n    StreamingResponse: File content with Content-Disposition header\n\nRaises:\n    HTTPException: 404 if file not found, 403 if not authorized",
+        "operationId": "download_file_api_v1_files__file_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Delete File",
+        "description": "Delete file (soft delete).\n\nArgs:\n    file_id: File UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    file_api: File API facade\n\nRaises:\n    HTTPException: 404 if file not found, 403 if not authorized",
+        "operationId": "delete_file_api_v1_files__file_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "api"
+    },
+    "/api/v1/files/{file_id}/metadata": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Get File Metadata",
+        "description": "Get file metadata only (no download).\n\nArgs:\n    file_id: File UUID\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    file_api: File API facade\n\nReturns:\n    FileResponse: File metadata\n\nRaises:\n    HTTPException: 404 if file not found, 403 if not authorized",
+        "operationId": "get_file_metadata_api_v1_files__file_id__metadata_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "api"
+    },
+    "/api/v1/files": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "List Files",
+        "description": "List files with optional filtering.\n\nArgs:\n    db: Database session\n    current_user: Authenticated user (from JWT)\n    file_api: File API facade\n    owner_type: Optional entity type filter\n    owner_id: Optional entity UUID filter\n    offset: Pagination offset\n    limit: Pagination limit\n\nReturns:\n    FileListPaginatedResponse: Paginated file list\n\nRaises:\n    HTTPException: 403 if not authorized to access owner entity",
+        "operationId": "list_files_api_v1_files_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "owner_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by owner type",
+              "title": "Owner Type"
+            },
+            "description": "Filter by owner type"
+          },
+          {
+            "name": "owner_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by owner ID",
+              "title": "Owner Id"
+            },
+            "description": "Filter by owner ID"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pagination offset",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Pagination offset"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "description": "Pagination limit",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Pagination limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListPaginatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "x-sync-mode": "api"
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Account/company name"
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner User Id",
+            "description": "User who owns this account (sales rep)"
+          },
+          "actual_value": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Value",
+            "description": "Actual deal value in USD"
+          },
+          "acv": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acv",
+            "description": "Annual contract value in USD"
+          },
+          "next_steps": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Steps",
+            "description": "Next steps for progressing this deal"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 320
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Primary contact email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Primary contact phone"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry",
+            "description": "Industry/vertical (e.g., SaaS, Healthcare)"
+          },
+          "employee_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employee Count",
+            "description": "Number of employees"
+          },
+          "annual_revenue": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Revenue",
+            "description": "Annual revenue in USD"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website",
+            "description": "Company website URL"
+          },
+          "lead_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Source",
+            "description": "Lead source (e.g., Inbound, Referral, Outbound)"
+          },
+          "close_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Date",
+            "description": "Target or actual close date for the deal"
+          },
+          "org_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Fields",
+            "description": "Organization custom fields"
+          },
+          "user_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Fields",
+            "description": "User-namespaced custom fields"
+          },
+          "external_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Fields",
+            "description": "External system fields"
+          },
+          "external_ids": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ids",
+            "description": "External record IDs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "owner_user_id"
+        ],
+        "title": "AccountCreate",
+        "description": "Schema for creating a new account."
+      },
+      "AccountFullContext": {
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountOwner"
+          },
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityOwner"
+            },
+            "type": "array",
+            "title": "Activities"
+          },
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryResponse"
+            },
+            "type": "array",
+            "title": "Memories"
+          },
+          "pending_suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestionResponse"
+            },
+            "type": "array",
+            "title": "Pending Suggestions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "activities",
+          "memories",
+          "pending_suggestions"
+        ],
+        "title": "AccountFullContext",
+        "description": "Full account context with all related data.\n\nUsed by get_full_context() to return complete account view.\n\nDealBrain Context:\n    pending_suggestions = AI-proposed changes awaiting approval.\n    Backend uses \"suggestions\" (future tense) to distinguish from event logs.\n    Frontend displays these as \"Suggested Updates\" in UI."
+      },
+      "AccountListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountOwner"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "AccountListResponse",
+        "description": "Paginated account list response."
+      },
+      "AccountOwner": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "actor_type": {
+            "type": "string",
+            "title": "Actor Type"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "actual_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Value"
+          },
+          "acv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acv"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry"
+          },
+          "employee_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employee Count"
+          },
+          "annual_revenue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Revenue"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          },
+          "lead_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Source"
+          },
+          "close_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Date"
+          },
+          "is_closed": {
+            "type": "boolean",
+            "title": "Is Closed"
+          },
+          "is_won": {
+            "type": "boolean",
+            "title": "Is Won"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "next_steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Steps"
+          },
+          "owner_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reference_number",
+          "display_name",
+          "actor_type",
+          "state",
+          "name",
+          "is_closed",
+          "is_won",
+          "is_active",
+          "owner_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AccountOwner",
+        "description": "Full account information for resource owner.\n\nExtends AccountAgent with owner-private fields AND system metadata.\nOwners get complete access to their own resources including:\n- Private notes (next_steps)\n- System metadata (owner_user_id, timestamps)\n\nRationale: Hiding timestamps/ownership from the owner makes no sense.\nIf UI wants to hide these fields, that's a frontend concern, not API.\n\nUse for: Account owners viewing/managing their own accounts"
+      },
+      "AccountUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "actual_value": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Value"
+          },
+          "acv": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acv"
+          },
+          "next_steps": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Steps"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 320
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry"
+          },
+          "employee_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employee Count"
+          },
+          "annual_revenue": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Revenue"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2083,
+                "minLength": 1,
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          },
+          "lead_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Source"
+          },
+          "close_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Date"
+          },
+          "org_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Fields",
+            "description": "Organization custom fields"
+          },
+          "user_fields": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Fields",
+            "description": "User-namespaced custom fields"
+          }
+        },
+        "type": "object",
+        "title": "AccountUpdate",
+        "description": "Schema for updating an account.\n\nAll fields are optional - only provided fields are updated.\nNote: state transitions use separate transition_stage method."
+      },
+      "AccountWithTracking": {
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/AccountOwner"
+          },
+          "changes_logged": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changes Logged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "changes_logged"
+        ],
+        "title": "AccountWithTracking",
+        "description": "Account with field change tracking.\n\nUsed by update_with_tracking() to return update results."
+      },
+      "ActivityListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityOwner"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "ActivityListResponse",
+        "description": "Paginated activity list response."
+      },
+      "ActivityOwner": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Number"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "activity_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Metadata"
+          },
+          "searchable_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchable Content"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "title",
+          "occurred_at",
+          "account_id",
+          "user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ActivityOwner",
+        "description": "Full activity information for account owner.\n\nExtends ActivityAgent with complete activity data:\n- User attribution (user_id - who created the activity)\n- Audit timestamps (created_at, updated_at)\n\nRationale: Account owners get complete access to activities for accounts\nthey own, including full audit trail and attribution.\n\nUse for: Account owners viewing/managing activities for their accounts"
+      },
+      "Body_upload_file_api_v1_files_upload_post": {
+        "properties": {
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "description": "Entity type (account, activity, user)"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner Id",
+            "description": "Owner entity UUID"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_type",
+          "owner_id",
+          "file"
+        ],
+        "title": "Body_upload_file_api_v1_files_upload_post"
+      },
+      "ExtendedColumnMetadataResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "All fields as flat list with source annotation"
+          },
+          "entity": {
+            "type": "string",
+            "title": "Entity",
+            "description": "Entity type (e.g., 'account')"
+          },
+          "view": {
+            "type": "string",
+            "title": "View",
+            "description": "View context (e.g., 'list', 'detail')"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Metadata schema version",
+            "default": "1.0"
+          },
+          "by_source": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "By Source",
+            "description": "Fields grouped by source: system, org, user, external:{type}"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "entity",
+          "view"
+        ],
+        "title": "ExtendedColumnMetadataResponse",
+        "description": "Extended metadata response including custom fields.\n\nExtends ColumnMetadataResponse to group fields by source, enabling\nUIs to render system fields separately from custom fields.\n\nExample:\n    >>> response = ExtendedColumnMetadataResponse(\n    ...     columns=[...],  # All fields flat\n    ...     entity=\"account\",\n    ...     view=\"list\",\n    ...     by_source={\n    ...         \"system\": [...],\n    ...         \"org\": [...],\n    ...         \"user\": [...],\n    ...         \"external\": {\"salesforce\": [...], \"hubspot\": [...]},\n    ...     },\n    ... )"
+      },
+      "FieldDefinitionCreate": {
+        "properties": {
+          "source_type": {
+            "$ref": "#/components/schemas/SourceType",
+            "description": "Source type: org, user, or external"
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source Id",
+            "description": "ID of owning org, user, or integration"
+          },
+          "entity_type": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Entity Type",
+            "description": "Target entity type (e.g., 'account')"
+          },
+          "field_name": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Field Name",
+            "description": "Field name (snake_case)"
+          },
+          "field_type": {
+            "$ref": "#/components/schemas/FieldType",
+            "description": "Data type for validation"
+          },
+          "ui_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UIMetadataSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UI hints: label, importance, group, help, etc."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "Whether field is required",
+            "default": false
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices",
+            "description": "Valid choices for SELECT/MULTISELECT"
+          },
+          "validation_rules": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Rules",
+            "description": "Additional validation: {min, max, pattern}"
+          },
+          "default_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value",
+            "description": "Default value for new records"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order",
+            "description": "Sort order within source",
+            "default": 0
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility",
+            "description": "Who can see values: public, owner_only, admin_only",
+            "default": "public"
+          },
+          "external_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Field Id",
+            "description": "External system's field identifier"
+          },
+          "integration_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Type",
+            "description": "Integration type (e.g., 'salesforce')"
+          },
+          "sync_direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncDirection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sync direction for external fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_type",
+          "source_id",
+          "entity_type",
+          "field_name",
+          "field_type"
+        ],
+        "title": "FieldDefinitionCreate",
+        "description": "Schema for creating a field definition.\n\nValidates field name format and prevents reserved field names.\n\nExample:\n    >>> data = FieldDefinitionCreate(\n    ...     source_type=SourceType.ORG,\n    ...     source_id=uuid.uuid4(),\n    ...     entity_type=\"account\",\n    ...     field_name=\"region\",\n    ...     field_type=FieldType.SELECT,\n    ...     choices=[\"West\", \"East\", \"Central\"],\n    ... )"
+      },
+      "FieldDefinitionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Number"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source Id"
+          },
+          "entity_type": {
+            "type": "string",
+            "title": "Entity Type"
+          },
+          "field_name": {
+            "type": "string",
+            "title": "Field Name"
+          },
+          "field_type": {
+            "type": "string",
+            "title": "Field Type"
+          },
+          "ui_metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Ui Metadata"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "validation_rules": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Rules"
+          },
+          "default_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order"
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "external_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Field Id"
+          },
+          "integration_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Type"
+          },
+          "sync_direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Direction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_type",
+          "source_id",
+          "entity_type",
+          "field_name",
+          "field_type",
+          "ui_metadata",
+          "required",
+          "choices",
+          "validation_rules",
+          "default_value",
+          "display_order",
+          "visibility",
+          "is_active",
+          "external_field_id",
+          "integration_type",
+          "sync_direction"
+        ],
+        "title": "FieldDefinitionResponse",
+        "description": "Schema for field definition API response.\n\nIncludes all field definition attributes for display.\n\nExample:\n    >>> response = FieldDefinitionResponse.model_validate(field_def)\n    >>> print(response.field_name)  # \"region\""
+      },
+      "FieldDefinitionUpdate": {
+        "properties": {
+          "ui_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UIMetadataSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "validation_rules": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Rules"
+          },
+          "default_value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "display_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Order"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "FieldDefinitionUpdate",
+        "description": "Schema for updating a field definition.\n\nAll fields are optional - only provided fields are updated.\nField name and type cannot be changed after creation.\n\nExample:\n    >>> update = FieldDefinitionUpdate(\n    ...     ui_metadata=UIMetadataSchema(label=\"Sales Region\"),\n    ...     choices=[\"West\", \"East\", \"Central\", \"International\"],\n    ... )"
+      },
+      "FieldType": {
+        "type": "string",
+        "enum": [
+          "text",
+          "textarea",
+          "number",
+          "boolean",
+          "date",
+          "datetime",
+          "email",
+          "url",
+          "phone",
+          "currency",
+          "percentage",
+          "select",
+          "multiselect",
+          "reference"
+        ],
+        "title": "FieldType",
+        "description": "Supported field types for custom fields.\n\nThese types define how field values are validated and stored.\nMaps to UIType in atoms/metadata/schemas.py for frontend rendering.\n\nAttributes:\n    TEXT: Short text input (max ~255 chars)\n    TEXTAREA: Multi-line text (longer content)\n    NUMBER: Numeric value (integer or float)\n    BOOLEAN: True/false value\n    DATE: Date without time (YYYY-MM-DD)\n    DATETIME: Date with time (ISO 8601)\n    EMAIL: Email address with validation\n    URL: URL with validation\n    PHONE: Phone number (basic validation)\n    CURRENCY: Monetary value (2 decimal places)\n    PERCENTAGE: Percentage value (0-100)\n    SELECT: Single choice from predefined options\n    MULTISELECT: Multiple choices from predefined options\n    REFERENCE: Foreign key reference to another entity (UUID)"
+      },
+      "FileActivityCreate": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id",
+            "description": "Account this activity belongs to"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Title",
+            "description": "Activity title/summary"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When activity happened"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "User who uploaded the file"
+          },
+          "file_name": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "File Name",
+            "description": "Original filename"
+          },
+          "file_size": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "File Size",
+            "description": "File size in bytes"
+          },
+          "file_url": {
+            "type": "string",
+            "title": "File Url",
+            "description": "URL to stored file"
+          },
+          "mime_type": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Mime Type",
+            "description": "MIME type"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Optional file description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "title",
+          "occurred_at",
+          "user_id",
+          "file_name",
+          "file_size",
+          "file_url",
+          "mime_type"
+        ],
+        "title": "FileActivityCreate",
+        "description": "Schema for creating file upload activities."
+      },
+      "FileListPaginatedResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FileListResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "FileListPaginatedResponse",
+        "description": "Paginated file list response."
+      },
+      "FileListResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reference_number",
+          "filename",
+          "content_type",
+          "size_bytes",
+          "owner_type",
+          "owner_id",
+          "created_at"
+        ],
+        "title": "FileListResponse",
+        "description": "Minimal schema for file list responses (lighter than full FileResponse)."
+      },
+      "FileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "File ID"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number",
+            "description": "Human-readable reference (FILE-2025-ABC123)"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "MIME type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "File size in bytes"
+          },
+          "storage_category": {
+            "type": "string",
+            "title": "Storage Category",
+            "description": "Storage category"
+          },
+          "s3_key": {
+            "type": "string",
+            "title": "S3 Key",
+            "description": "S3 object key"
+          },
+          "checksum_md5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Md5",
+            "description": "MD5 hash"
+          },
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256",
+            "description": "SHA256 hash"
+          },
+          "owner_type": {
+            "type": "string",
+            "title": "Owner Type",
+            "description": "Entity type that owns this file"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Owner Id",
+            "description": "ID of the owning entity"
+          },
+          "uploaded_by_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Uploaded By User Id",
+            "description": "User who uploaded the file"
+          },
+          "file_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Metadata",
+            "description": "Additional metadata"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Upload timestamp"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reference_number",
+          "filename",
+          "content_type",
+          "size_bytes",
+          "storage_category",
+          "s3_key",
+          "owner_type",
+          "owner_id",
+          "uploaded_by_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FileResponse",
+        "description": "Full file response with all fields."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "description": "User's email address"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "description": "User's password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "description": "Schema for login requests.",
+        "example": {
+          "email": "user@example.com",
+          "password": "secure_password123"
+        }
+      },
+      "MeetingActivityCreate": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id",
+            "description": "Account this activity belongs to"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Title",
+            "description": "Activity title/summary"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When activity happened"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "User who logged the meeting"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Optional meeting notes"
+          },
+          "meeting_date": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Meeting Date",
+            "description": "When meeting occurred"
+          },
+          "attendees": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Attendees",
+            "description": "List of attendee names/emails"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location",
+            "description": "Meeting location"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "title",
+          "occurred_at",
+          "user_id",
+          "meeting_date"
+        ],
+        "title": "MeetingActivityCreate",
+        "description": "Schema for creating meeting/event activities."
+      },
+      "MemoryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id"
+          },
+          "extracted_from_activity_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Extracted From Activity Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "extracted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Extracted At"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "extracted_from_activity_id",
+          "content",
+          "extracted_at",
+          "confidence",
+          "category",
+          "is_active",
+          "created_at",
+          "updated_at",
+          "reference_number"
+        ],
+        "title": "MemoryResponse",
+        "description": "Memory response DTO."
+      },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token",
+            "description": "Refresh token to exchange"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest",
+        "description": "Schema for token refresh requests.",
+        "example": {
+          "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        }
+      },
+      "RefreshResult": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token"
+        ],
+        "title": "RefreshResult",
+        "description": "Schema for token refresh responses."
+      },
+      "RegisterRequest": {
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "First Name",
+            "description": "User's first name"
+          },
+          "last_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Last Name",
+            "description": "User's last name"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "description": "User's email address"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Password",
+            "description": "User's password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "first_name",
+          "last_name",
+          "email",
+          "password"
+        ],
+        "title": "RegisterRequest",
+        "description": "Schema for user registration requests.",
+        "example": {
+          "email": "john.doe@example.com",
+          "first_name": "John",
+          "last_name": "Doe",
+          "password": "secure_password123"
+        }
+      },
+      "SemanticImportance": {
+        "type": "string",
+        "enum": [
+          "primary",
+          "secondary",
+          "tertiary",
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "minimal"
+        ],
+        "title": "SemanticImportance",
+        "description": "Semantic importance levels matching Field() ui_importance.\n\nThese values align with Field() definition in atoms/patterns/fields.py:\n- primary: Most important, always show\n- secondary: Supporting information\n- tertiary: Optional/metadata field (default)\n\nFor backward compatibility, also accepts severity-based values:\n- critical, high -> equivalent to primary\n- medium -> equivalent to secondary\n- low, minimal -> equivalent to tertiary"
+      },
+      "SourceType": {
+        "type": "string",
+        "enum": [
+          "system",
+          "org",
+          "user",
+          "external"
+        ],
+        "title": "SourceType",
+        "description": "Source types for custom field definitions.\n\nIndicates who owns/defined the field:\n- SYSTEM: Built-in fields from the model (introspected, not stored)\n- ORG: Organization-defined fields for all users in the org\n- USER: User's personal custom fields\n- EXTERNAL: Fields synced from external integrations\n\nAttributes:\n    SYSTEM: Built-in fields from model definition (not persisted)\n    ORG: Organization-defined custom fields\n    USER: User-defined personal fields\n    EXTERNAL: Fields from external integrations (Salesforce, HubSpot, etc.)"
+      },
+      "StageInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "allowed_transitions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Transitions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "allowed_transitions"
+        ],
+        "title": "StageInfo",
+        "description": "Stage information with allowed transitions."
+      },
+      "StageMetadataResponse": {
+        "properties": {
+          "all_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "All Stages"
+          },
+          "initial_stage": {
+            "type": "string",
+            "title": "Initial Stage"
+          },
+          "stage_transitions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Stage Transitions"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageInfo"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "all_stages",
+          "initial_stage",
+          "stage_transitions",
+          "stages"
+        ],
+        "title": "StageMetadataResponse",
+        "description": "Complete stage configuration metadata."
+      },
+      "StageTransitionRequest": {
+        "properties": {
+          "new_stage": {
+            "type": "string",
+            "title": "New Stage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_stage"
+        ],
+        "title": "StageTransitionRequest",
+        "description": "Request to transition account stage."
+      },
+      "SuggestionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id"
+          },
+          "source_activity_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source Activity Id"
+          },
+          "field_name": {
+            "type": "string",
+            "title": "Field Name"
+          },
+          "old_value": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Old Value"
+          },
+          "new_value": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "New Value"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "reviewed_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By User Id"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "reference_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Number"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "source_activity_id",
+          "field_name",
+          "old_value",
+          "new_value",
+          "state",
+          "reviewed_by_user_id",
+          "reviewed_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SuggestionResponse",
+        "description": "Suggestion response schema."
+      },
+      "SyncDirection": {
+        "type": "string",
+        "enum": [
+          "inbound",
+          "outbound",
+          "bidirectional"
+        ],
+        "title": "SyncDirection",
+        "description": "Sync direction for external field mappings.\n\nControls data flow between local and external systems.\n\nAttributes:\n    INBOUND: External -> Local only (read from external)\n    OUTBOUND: Local -> External only (write to external)\n    BIDIRECTIONAL: Both directions (full sync)"
+      },
+      "TextActivityCreate": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id",
+            "description": "Account this activity belongs to"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Title",
+            "description": "Activity title/summary"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When activity happened"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "User who created the note"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "Note content (required)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "title",
+          "occurred_at",
+          "user_id",
+          "content"
+        ],
+        "title": "TextActivityCreate",
+        "description": "Schema for creating text note/comment activities."
+      },
+      "TokenResponse": {
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserInfo"
+          },
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user",
+          "access_token",
+          "refresh_token"
+        ],
+        "title": "TokenResponse",
+        "description": "Schema for token responses (login/register success).",
+        "example": {
+          "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+          "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+          "token_type": "bearer",
+          "user": {
+            "display_name": "John Doe",
+            "email": "john.doe@example.com",
+            "first_name": "John",
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "last_name": "Doe",
+            "reference_number": "USR-2025-ABC123"
+          }
+        }
+      },
+      "UIMetadataSchema": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label",
+            "description": "Display label for the field"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "Semantic UI type (text, select, etc.)"
+          },
+          "importance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SemanticImportance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business importance: primary, secondary, tertiary"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group",
+            "description": "Logical grouping for forms"
+          },
+          "sortable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortable",
+            "description": "Whether field can be sorted"
+          },
+          "filterable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filterable",
+            "description": "Whether field can be filtered"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format",
+            "description": "Format hints (e.g., {currency: 'USD', decimals: 2})"
+          },
+          "visible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visible",
+            "description": "Whether visible by default"
+          },
+          "help": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help",
+            "description": "Help text for forms/tooltips"
+          },
+          "placeholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placeholder",
+            "description": "Placeholder text for inputs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UIMetadataSchema",
+        "description": "Validated schema for ui_metadata field in FieldDefinition API.\n\nAttributes match Field() ui_* parameters (without ui_ prefix):\n- label: Display label (ui_label)\n- type: Semantic UI type (ui_type)\n- importance: Business importance (ui_importance)\n- group: Field grouping (ui_group)\n- sortable: Whether sortable (ui_sortable)\n- filterable: Whether filterable (ui_filterable)\n- format: Format hints dict (ui_format)\n- visible: Whether visible (ui_visible)\n- help: Help text (ui_help)\n- placeholder: Placeholder text (ui_placeholder)\n\nExample:\n    >>> metadata = UIMetadataSchema(\n    ...     label=\"Sales Region\",\n    ...     importance=\"primary\",\n    ...     group=\"custom\",\n    ...     help=\"Select the region for this account\"\n    ... )"
+      },
+      "UserInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number"
+          },
+          "first_name": {
+            "type": "string",
+            "title": "First Name"
+          },
+          "last_name": {
+            "type": "string",
+            "title": "Last Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name",
+            "description": "Get user's full name.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reference_number",
+          "first_name",
+          "last_name",
+          "display_name",
+          "email",
+          "full_name"
+        ],
+        "title": "UserInfo",
+        "description": "Basic user information included in auth responses."
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reference_number": {
+            "type": "string",
+            "title": "Reference Number"
+          },
+          "first_name": {
+            "type": "string",
+            "title": "First Name"
+          },
+          "last_name": {
+            "type": "string",
+            "title": "Last Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "actor_type": {
+            "type": "string",
+            "title": "Actor Type"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "oauth_accounts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Oauth Accounts"
+          },
+          "activity_count": {
+            "type": "integer",
+            "title": "Activity Count"
+          },
+          "last_activity_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Activity At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name",
+            "description": "Get user's full name.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "reference_number",
+          "first_name",
+          "last_name",
+          "display_name",
+          "email",
+          "phone",
+          "actor_type",
+          "is_active",
+          "oauth_accounts",
+          "activity_count",
+          "last_activity_at",
+          "created_at",
+          "updated_at",
+          "full_name"
+        ],
+        "title": "UserResponse",
+        "description": "Full user response (for authenticated user viewing their own data)."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VoiceActivityCreate": {
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Account Id",
+            "description": "Account this activity belongs to"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Title",
+            "description": "Activity title/summary"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When activity happened"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id",
+            "description": "User who made/received the call"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Optional transcript or summary"
+          },
+          "duration": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration",
+            "description": "Duration in seconds"
+          },
+          "transcript": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcript",
+            "description": "Voice transcription"
+          },
+          "recording_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Url",
+            "description": "URL to recording file"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_id",
+          "title",
+          "occurred_at",
+          "user_id",
+          "duration"
+        ],
+        "title": "VoiceActivityCreate",
+        "description": "Schema for creating voice call/recording activities."
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
