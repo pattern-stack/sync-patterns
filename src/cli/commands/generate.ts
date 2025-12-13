@@ -30,7 +30,7 @@ export interface GenerateOptions {
   authTokenKey?: string
   dryRun?: boolean
   verbose?: boolean
-  useNewGenerators?: boolean
+  useLegacyGenerators?: boolean
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -253,13 +253,13 @@ export async function generateCommand(
 
     if (options.dryRun) {
       console.log('\n[DRY RUN] Would generate:')
-      if (options.useNewGenerators) {
-        console.log('[Using new generator architecture]')
-        console.log(`  - API layer in ${options.output}/api/`)
-        console.log(`  - React hooks in ${options.output}/hooks/`)
-      } else {
+      if (options.useLegacyGenerators) {
         console.log('[Using legacy generator architecture]')
         console.log(`  - API client in ${options.output}/client/`)
+        console.log(`  - React hooks in ${options.output}/hooks/`)
+      } else {
+        console.log('[Using new generator architecture]')
+        console.log(`  - API layer in ${options.output}/api/`)
         console.log(`  - React hooks in ${options.output}/hooks/`)
       }
       if (options.schemas) {
@@ -276,8 +276,8 @@ export async function generateCommand(
       return
     }
 
-    // Use new or old generation path
-    if (options.useNewGenerators) {
+    // Use new architecture by default, legacy if explicitly requested
+    if (!options.useLegacyGenerators) {
       return await generateWithNewArchitecture(spec, options)
     }
 

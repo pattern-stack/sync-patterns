@@ -1,8 +1,8 @@
 /**
  * EntityTableView Component
  *
- * Fetches entity data via direct API calls and renders in a DataTable.
- * Uses the generated API client for data fetching.
+ * Fetches entity data using the API client and renders in a DataTable.
+ * Uses a configurable API client for data fetching with proper auth handling.
  * Extracts UIType from metadata for proper rendering and column sizing.
  */
 
@@ -11,6 +11,7 @@ import { Box, Text } from 'ink'
 import DataTable, { type Column } from './DataTable.js'
 import type { UIType } from '../renderers/index.js'
 import { inferUIType } from '../utils/column-sizing.js'
+import { apiClient, configureApi } from '../utils/api-client.js'
 
 export interface EntityTableViewProps {
   entityName: string
@@ -58,31 +59,24 @@ export function EntityTableView({
       try {
         setState(s => ({ ...s, isLoading: true, error: null }))
 
-        // Build headers with optional auth
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-        }
-        if (authToken) {
-          headers['Authorization'] = `Bearer ${authToken}`
-        }
+        // Configure the API client with baseUrl and auth token
+        configureApi({
+          baseUrl: apiUrl,
+          authToken: authToken,
+        })
 
-        // Fetch data and metadata in parallel
-        const [dataRes, metaRes] = await Promise.all([
-          fetch(`${apiUrl}/${entityName}`, { headers }),
-          fetch(`${apiUrl}/${entityName}/fields/metadata?view=list`, { headers }).catch(() => null),
+        // Fetch data and metadata in parallel using the generated API client
+        const [dataJson, metaJson] = await Promise.all([
+          apiClient.get<any>(`/${entityName}`),
+          apiClient.get<any>(`/${entityName}/fields/metadata?view=list`).catch(() => null),
         ])
 
-        if (!dataRes.ok) {
-          throw new Error(`Failed to fetch ${entityName}: ${dataRes.status}`)
-        }
-
-        const dataJson = await dataRes.json()
+        // Extract data from response (handle different response shapes)
         const data = dataJson.items ?? dataJson.data ?? dataJson
 
         // Parse metadata if available
         let columns: Column[] = []
-        if (metaRes?.ok) {
-          const metaJson = await metaRes.json()
+        if (metaJson) {
           // Metadata uses 'field' not 'key' - filter to primary/secondary importance for list view
           const allColumns: MetadataColumn[] = metaJson.columns ?? []
           const listColumns = allColumns.filter((col) =>

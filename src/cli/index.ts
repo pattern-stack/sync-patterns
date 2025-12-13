@@ -54,7 +54,7 @@ program
     'localStorage key for auth token',
     process.env.SYNC_PATTERNS_AUTH_TOKEN_KEY || 'auth_token'
   )
-  .option('--use-new-generators', 'Use new generator architecture (api/ and hooks/ directories)')
+  .option('--use-legacy-generators', 'Use legacy generator architecture (client/ directory with flat hooks/)')
   .option('--dry-run', 'Preview without writing files')
   .option('--verbose', 'Show detailed output')
   .action(generateCommand)
