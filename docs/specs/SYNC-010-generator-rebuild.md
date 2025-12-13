@@ -1,8 +1,55 @@
 # SYNC-010: Generator Architecture Rebuild
 
-> **Status**: DRAFT
+> **Status**: IN PROGRESS
 > **Created**: 2025-12-11
+> **Updated**: 2025-12-13
 > **Author**: Claude + Dug
+
+## Implementation Status
+
+| Phase | Component | Tests | Status |
+|-------|-----------|-------|--------|
+| 1 | EntityModel + EntityResolver | 24 | ✅ Complete |
+| 2 | ApiGenerator | 25 | ✅ Complete |
+| 3 | HookGenerator | 25 | ✅ Complete |
+| 4 | SchemaGenerator | - | 🔮 Deferred |
+| 5 | Integration | 18 | ✅ Complete |
+| **Total** | | **92** | |
+
+### Completed Work
+
+**Branch**: `refactor/generator-rebuild`
+
+```
+8b6b263 test(core): add integration tests with sales-patterns spec
+a87c5ec feat(core): add HookGenerator (Phase 3)
+739b1e9 feat(core): add ApiGenerator (Phase 2)
+0572884 feat(core): add EntityModel and EntityResolver (Phase 1)
+8ff6a3e docs: add SYNC-010 generator rebuild spec
+```
+
+**Files Created**:
+```
+src/core/
+├── entity-model.ts      # Core types
+├── entity-resolver.ts   # OpenAPI → EntityModel
+├── api-generator.ts     # EntityModel → Pure TS API
+├── hook-generator.ts    # EntityModel → React hooks
+└── index.ts
+
+test/core/
+├── entity-resolver.test.ts   (24 tests)
+├── api-generator.test.ts     (25 tests)
+├── hook-generator.test.ts    (25 tests)
+└── integration.test.ts       (18 tests)
+
+test/fixtures/
+├── minimal-crud.json
+├── with-sync-modes.json
+├── with-custom-operations.json
+├── nested-resources.json
+└── sales-patterns-openapi.json
+```
 
 ## Problem Statement
 
@@ -642,26 +689,178 @@ describe('Full Pipeline Integration', () => {
 
 ## Success Criteria
 
-- [ ] All EntityResolver tests pass
-- [ ] All ApiGenerator tests pass
-- [ ] All HookGenerator tests pass
-- [ ] All SchemaGenerator tests pass
-- [ ] Integration test with sales-patterns spec passes
+- [x] All EntityResolver tests pass (24 tests)
+- [x] All ApiGenerator tests pass (25 tests)
+- [x] All HookGenerator tests pass (25 tests)
+- [ ] All SchemaGenerator tests pass (deferred - existing zod-generator works)
+- [x] Integration test with sales-patterns spec passes (18 tests)
 - [ ] TUI can use generated api layer
 - [ ] Generated code type-checks cleanly
+- [ ] CLI wired up to new generators
 - [ ] No regression in existing functionality
 
-## Open Questions
+## Decisions Made
 
-1. **Should we keep the flat hooks/mutations.ts files?**
-   - Current: hooks/queries.ts has all query hooks
-   - Proposed: hooks/accounts.ts has account-specific hooks
-   - Decision: Entity-grouped is cleaner, matches api layer
+1. **Entity-grouped files over flat files**
+   - ✅ Decision: hooks/accounts.ts, api/accounts.ts (entity-grouped)
+   - Rationale: Cleaner imports, better tree-shaking, matches mental model
 
-2. **How to handle non-entity endpoints?**
-   - /health, /ready, /auth/login
-   - Proposal: Generate in separate `system.ts` or `auth.ts` files
+2. **Hooks wrap API layer**
+   - ✅ Decision: `useAccounts()` calls `accountsApi.list()`, NOT `fetch()`
+   - Rationale: Single source of truth, TUI and React share same API layer
 
-3. **Metadata endpoint detection**
-   - /accounts/fields/metadata is special
-   - Proposal: Detect via path pattern, wire into `listWithMeta()`
+3. **Smart path parameter naming**
+   - ✅ Decision: Single `{entity_id}` param → `id` in method signature
+   - ✅ Decision: Multiple params → preserve exact names
+   - Rationale: Clean API for common case, explicit for complex nested resources
+
+4. **Metadata endpoint detection**
+   - ✅ Decision: Detect `/fields/metadata` pattern, generate `listWithMeta()`
+   - Rationale: Common pattern in Pattern Stack, needed for DataTable integration
+
+5. **Auth detection hierarchy**
+   - ✅ Decision: Operation > Path > Global security
+   - Rationale: Matches OpenAPI spec semantics, explicit empty array = no auth
+
+## Next Steps
+
+### Immediate (Wire Up)
+
+1. **Wire CLI to new generators**
+   ```bash
+   # Update src/cli/commands/generate.ts
+   # Use EntityResolver + ApiGenerator + HookGenerator
+   ```
+
+2. **Update TUI to use generated API layer**
+   ```typescript
+   // EntityTableView.tsx
+   import { accountsApi, configureApi } from './generated/api'
+
+   configureApi({ baseUrl: apiUrl, authToken })
+   const { data, columns } = await accountsApi.listWithMeta()
+   ```
+
+3. **Test with sales-patterns**
+   - Regenerate sales-patterns frontend
+   - Verify no regressions
+   - Verify TUI works with new layer
+
+### Future (When Needed)
+
+4. **SchemaGenerator refactor**
+   - Existing zod-generator works but uses flat structure
+   - Could refactor to use EntityModel for consistency
+   - Low priority - current output is correct
+
+5. **Deprecate old generators**
+   - Once validated, remove old generator code
+   - Update all imports to use `src/core/`
+
+6. **Event-driven sync**
+   - When ready to implement new sync architecture
+   - EntityModel already has `syncMode` field
+   - New generators can use this to generate appropriate code
+
+## Architecture Diagram
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         OpenAPI Spec                │
+                    │    (sales-patterns, etc.)           │
+                    └─────────────────────────────────────┘
+                                     │
+                                     ▼
+                    ┌─────────────────────────────────────┐
+                    │        EntityResolver               │
+                    │   (src/core/entity-resolver.ts)     │
+                    │                                     │
+                    │   - Detects entities from paths     │
+                    │   - Classifies CRUD vs custom ops   │
+                    │   - Extracts sync modes             │
+                    │   - Resolves schemas                │
+                    └─────────────────────────────────────┘
+                                     │
+                                     ▼
+                    ┌─────────────────────────────────────┐
+                    │          EntityModel                │
+                    │   (Single Source of Truth)          │
+                    │                                     │
+                    │   entities: Map<name, EntityDef>    │
+                    │     - operations (CRUD)             │
+                    │     - customOperations              │
+                    │     - metadataOperation             │
+                    │     - schemas                       │
+                    │     - syncMode                      │
+                    └─────────────────────────────────────┘
+                                     │
+           ┌─────────────────────────┼─────────────────────────┐
+           ▼                         ▼                         ▼
+┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+│    ApiGenerator     │   │   HookGenerator     │   │  (SchemaGenerator)  │
+│                     │   │                     │   │                     │
+│  Pure TypeScript    │   │  React + TanStack   │   │  Zod schemas        │
+│  No React deps      │   │  Query integration  │   │  (existing works)   │
+│                     │   │                     │   │                     │
+│  TUI uses this!     │   │  Wraps API layer    │   │                     │
+└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+           │                         │                         │
+           ▼                         ▼                         ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Generated Output                                 │
+│                                                                         │
+│  api/                     hooks/                    schemas/            │
+│  ├── accounts.ts          ├── accounts.ts           ├── account.ts      │
+│  │   accountsApi.list()   │   useAccounts()         │   AccountSchema   │
+│  │   accountsApi.get(id)  │   useCreateAccount()    │                   │
+│  │   listWithMeta()       │   useAccountsWithMeta() │                   │
+│  ├── client.ts            ├── keys.ts               └── index.ts        │
+│  │   configureApi()       │   queryKeys.accounts                        │
+│  └── index.ts             └── index.ts                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Usage Examples
+
+### TUI (Pure TypeScript)
+
+```typescript
+import { accountsApi, configureApi } from './generated/api'
+
+// Configure once at startup
+configureApi({
+  baseUrl: 'http://localhost:8000/api/v1',
+  authToken: storedToken,
+})
+
+// Use anywhere - no React needed
+const { data, columns } = await accountsApi.listWithMeta()
+const account = await accountsApi.get('uuid-here')
+await accountsApi.create({ name: 'New Account' })
+```
+
+### React App
+
+```typescript
+import { useAccounts, useAccountsWithMeta, useCreateAccount } from './generated/hooks'
+import { configureApi } from './generated/api'
+
+// Configure once in App.tsx
+configureApi({ baseUrl: import.meta.env.VITE_API_URL })
+
+// In components
+function AccountsPage() {
+  const { data, columns, isReady } = useAccountsWithMeta()
+  const createMutation = useCreateAccount()
+
+  if (!isReady) return <Loading />
+
+  return (
+    <DataTable
+      data={data}
+      columns={columns}
+      onAdd={() => createMutation.mutate({ name: 'New' })}
+    />
+  )
+}
+```
