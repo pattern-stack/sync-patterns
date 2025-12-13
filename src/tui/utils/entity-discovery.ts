@@ -5,7 +5,7 @@
  */
 
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 
 export type SyncMode = 'api' | 'realtime' | 'offline'
 
@@ -26,7 +26,8 @@ export interface EntityMetadata {
  * Scan src/generated/entities/ directory to find all entity modules
  */
 export async function discoverEntities(generatedDir: string = 'src/generated'): Promise<EntityMetadata[]> {
-  const entitiesDir = join(process.cwd(), generatedDir, 'entities')
+  // resolve() handles both relative and absolute paths correctly
+  const entitiesDir = join(resolve(generatedDir), 'entities')
 
   try {
     // Check if entities directory exists

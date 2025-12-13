@@ -5,7 +5,7 @@
  */
 
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { render } from 'ink'
 import React from 'react'
 import { getTokenForUrl } from '../utils/auth-config.js'
@@ -60,10 +60,10 @@ async function findGeneratedDir(): Promise<string | null> {
 
 export async function exploreCommand(options: ExploreOptions): Promise<void> {
   try {
-    // Find generated code directory
-    const generatedDir = options.generatedDir || await findGeneratedDir()
+    // Find generated code directory (normalize to absolute path)
+    const foundDir = options.generatedDir || await findGeneratedDir()
 
-    if (!generatedDir) {
+    if (!foundDir) {
       console.error('Error: Generated code not found')
       console.error('')
       console.error('The TUI Explorer requires generated code to function.')
@@ -83,8 +83,9 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
       process.exit(1)
     }
 
-    const fullGeneratedPath = join(process.cwd(), generatedDir)
-    const hasGenerated = await checkGeneratedCode(join(fullGeneratedPath, 'entities'))
+    // Normalize to absolute path (handles both relative and absolute inputs)
+    const generatedDir = resolve(foundDir)
+    const hasGenerated = await checkGeneratedCode(join(generatedDir, 'entities'))
 
     if (!hasGenerated) {
       console.error(`Error: No entities found in ${generatedDir}`)
