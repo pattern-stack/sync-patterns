@@ -273,4 +273,152 @@ describe('EntityResolver', () => {
       expect(model.info.version).toBe('1.0.0')
     })
   })
+
+  describe('authentication detection', () => {
+    describe('operation-level security', () => {
+      it('detects operation with explicit security requirement', () => {
+        const spec = loadFixture('with-security-operation.json')
+        const model = resolver.resolve(spec)
+        const tasks = model.entities.get('tasks')!
+
+        // POST /tasks has explicit security
+        expect(tasks.operations.create).toBeDefined()
+        expect(tasks.operations.create!.requiresAuth).toBe(true)
+      })
+
+      it('detects operation without security when no global security', () => {
+        const spec = loadFixture('with-security-operation.json')
+        const model = resolver.resolve(spec)
+        const tasks = model.entities.get('tasks')!
+
+        // GET /tasks has no security (and no global security)
+        expect(tasks.operations.list).toBeDefined()
+        expect(tasks.operations.list!.requiresAuth).toBe(false)
+      })
+    })
+
+    describe('global security inheritance', () => {
+      it('inherits global security when no operation-level security', () => {
+        const spec = loadFixture('with-security-global.json')
+        const model = resolver.resolve(spec)
+        const users = model.entities.get('users')!
+
+        // GET /users should inherit global security
+        expect(users.operations.list).toBeDefined()
+        expect(users.operations.list!.requiresAuth).toBe(true)
+      })
+
+      it('correctly extracts bearer auth from global security', () => {
+        const spec = loadFixture('with-security-global.json')
+        const model = resolver.resolve(spec)
+
+        expect(model.auth.type).toBe('bearer')
+        expect(model.auth.schemes).toHaveLength(1)
+        expect(model.auth.schemes[0].type).toBe('http')
+        expect(model.auth.schemes[0].scheme).toBe('bearer')
+      })
+    })
+
+    describe('path-level security', () => {
+      it('inherits path-level security when no operation security', () => {
+        const spec = loadFixture('with-security-path.json')
+        const model = resolver.resolve(spec)
+        const products = model.entities.get('products')!
+
+        // GET /products should inherit path-level security
+        expect(products.operations.list).toBeDefined()
+        expect(products.operations.list!.requiresAuth).toBe(true)
+      })
+    })
+
+    describe('security override scenarios', () => {
+      it('operation security: [] overrides global security (public endpoint)', () => {
+        const spec = loadFixture('with-security-override.json')
+        const model = resolver.resolve(spec)
+        const publicEntity = model.entities.get('public')!
+
+        // GET /public has explicit security: [] to override global
+        expect(publicEntity.operations.list).toBeDefined()
+        expect(publicEntity.operations.list!.requiresAuth).toBe(false)
+      })
+
+      it('operation inherits global security when not overridden', () => {
+        const spec = loadFixture('with-security-override.json')
+        const model = resolver.resolve(spec)
+        const protectedEntity = model.entities.get('protected')!
+
+        // GET /protected inherits global security
+        expect(protectedEntity.operations.list).toBeDefined()
+        expect(protectedEntity.operations.list!.requiresAuth).toBe(true)
+      })
+    })
+
+    describe('no security defined', () => {
+      it('returns requiresAuth: false when no security at any level', () => {
+        const spec = loadFixture('minimal-crud.json')
+        const model = resolver.resolve(spec)
+        const accounts = model.entities.get('accounts')!
+
+        // minimal-crud.json has no security defined anywhere
+        expect(accounts.operations.list!.requiresAuth).toBe(false)
+        expect(accounts.operations.get!.requiresAuth).toBe(false)
+        expect(accounts.operations.create!.requiresAuth).toBe(false)
+        expect(accounts.operations.update!.requiresAuth).toBe(false)
+        expect(accounts.operations.delete!.requiresAuth).toBe(false)
+      })
+    })
+
+    describe('security precedence', () => {
+      it('operation-level takes precedence over path and global', () => {
+        // Test operation-level override of global
+        const spec = loadFixture('with-security-override.json')
+        const model = resolver.resolve(spec)
+        const publicEntity = model.entities.get('public')!
+
+        // Operation-level security: [] overrides global
+        expect(publicEntity.operations.list!.requiresAuth).toBe(false)
+      })
+
+      it('follows precedence: operation > path > global', () => {
+        // Create a spec with all three levels
+        const spec: OpenAPIV3.Document = {
+          openapi: '3.1.0',
+          info: { title: 'Test', version: '1.0.0' },
+          security: [{ globalAuth: [] }],
+          paths: {
+            '/api/v1/items': {
+              security: [{ pathAuth: [] }],
+              get: {
+                operationId: 'list_items',
+                summary: 'Inherits path-level',
+                responses: { '200': { description: 'OK' } },
+              },
+              post: {
+                operationId: 'create_item',
+                summary: 'Operation-level override',
+                security: [{ operationAuth: [] }],
+                responses: { '201': { description: 'Created' } },
+              },
+            },
+          },
+          components: {
+            securitySchemes: {
+              globalAuth: { type: 'http', scheme: 'bearer' },
+              pathAuth: { type: 'apiKey', in: 'header', name: 'X-Path-Key' },
+              operationAuth: { type: 'apiKey', in: 'header', name: 'X-Op-Key' },
+            },
+          },
+        }
+
+        const model = resolver.resolve(spec)
+        const items = model.entities.get('items')!
+
+        // GET inherits path-level (ignores global)
+        expect(items.operations.list!.requiresAuth).toBe(true)
+
+        // POST uses operation-level (ignores path and global)
+        expect(items.operations.create!.requiresAuth).toBe(true)
+      })
+    })
+  })
 })

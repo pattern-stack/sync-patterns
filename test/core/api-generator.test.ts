@@ -155,7 +155,7 @@ describe('ApiGenerator', () => {
       const output = generator.generate(model)
       const code = output.entities.get('accounts')!
 
-      expect(code).toContain('transitionStage')
+      expect(code).toContain('transitionAccountStage')
     })
 
     it('custom operations include path parameters', () => {
@@ -163,8 +163,8 @@ describe('ApiGenerator', () => {
       const output = generator.generate(model)
       const code = output.entities.get('accounts')!
 
-      // transitionStage should take account_id
-      expect(code).toMatch(/transitionStage\([^)]*id:\s*string/)
+      // transitionAccountStage should take account_id
+      expect(code).toMatch(/transitionAccountStage\([^)]*id:\s*string/)
     })
 
     it('custom operations include request body when present', () => {
@@ -269,6 +269,68 @@ describe('ApiGenerator', () => {
 
       expect(code).toContain('Auto-generated')
       expect(code).toContain('Do not edit')
+    })
+  })
+
+  describe('multi-path parameter handling', () => {
+    it('preserves single path parameter as id', () => {
+      const model = resolveFixture('minimal-crud.json')
+      const output = generator.generate(model)
+      const code = output.entities.get('accounts')!
+
+      // Single path param (account_id) should use 'id' for clean API
+      expect(code).toMatch(/async get\(id: string\)/)
+      expect(code).toMatch(/async update\(id: string, data:/)
+      expect(code).toMatch(/async delete\(id: string\)/)
+
+      // Should still reference correct path param in template string
+      expect(code).toContain('${id}')
+    })
+
+    it('custom operations with single param use id for clean API', () => {
+      const model = resolveFixture('with-custom-operations.json')
+      const output = generator.generate(model)
+      const accountsCode = output.entities.get('accounts')!
+
+      // Standard CRUD with single param should use 'id'
+      expect(accountsCode).toMatch(/async get\(id: string\)/)
+
+      // Custom operations with single param should also use 'id'
+      expect(accountsCode).toMatch(/async transitionAccountStage\(id: string, data:/)
+      expect(accountsCode).toMatch(/async archiveAccount\(id: string\)/)
+    })
+
+    it('preserves multiple path parameters in nested resource paths', () => {
+      const model = resolveFixture('nested-resources.json')
+      const output = generator.generate(model)
+      const accountsCode = output.entities.get('accounts')!
+
+      // The nested route `/accounts/{account_id}/contacts/{contact_id}`
+      // has multiple path params, so should use exact names
+      expect(accountsCode).toMatch(/async get\(account_id: string, contact_id: string\)/)
+
+      // Should use exact param names in template strings
+      expect(accountsCode).toContain('${account_id}')
+      expect(accountsCode).toContain('${contact_id}')
+    })
+
+    it('generates correct path templates for nested resources', () => {
+      const model = resolveFixture('nested-resources.json')
+      const output = generator.generate(model)
+      const accountsCode = output.entities.get('accounts')!
+
+      // Check that nested path template is preserved correctly
+      expect(accountsCode).toContain('/api/v1/accounts/${account_id}/contacts/${contact_id}')
+    })
+
+    it('handles multiple entities correctly', () => {
+      const model = resolveFixture('nested-resources.json')
+      const output = generator.generate(model)
+
+      // Should have separate entities for orgs and accounts
+      expect(output.entities.has('orgs')).toBe(true)
+      expect(output.entities.has('accounts')).toBe(true)
+      expect(output.entities.size).toBeGreaterThanOrEqual(2)
     })
   })
 })

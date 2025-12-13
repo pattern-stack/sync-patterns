@@ -201,6 +201,9 @@ ${methods.join(',\n\n')}
     const op = entity.operations.get!
     const returnType = entity.schemas.item || entity.pascalName
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
+    const methodParams = this.buildMethodParams(op.pathParams)
+    const paramMapping = this.createParamMapping(op.pathParams, methodParams)
+    const finalTemplate = this.applyParamMapping(pathTemplate, paramMapping)
 
     const jsdoc = this.options.includeJSDoc
       ? `  /**
@@ -209,8 +212,8 @@ ${methods.join(',\n\n')}
 `
       : ''
 
-    return `${jsdoc}  async get(id: string): Promise<${returnType}> {
-    return await apiClient.get<${returnType}>(\`${pathTemplate}\`)
+    return `${jsdoc}  async get(${methodParams.join(', ')}): Promise<${returnType}> {
+    return await apiClient.get<${returnType}>(\`${finalTemplate}\`)
   }`
   }
 
@@ -243,6 +246,9 @@ ${methods.join(',\n\n')}
     const requestType = entity.schemas.updateRequest || `${entity.pascalName}Update`
     const returnType = entity.schemas.item || entity.pascalName
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
+    const methodParams = this.buildMethodParams(op.pathParams)
+    const paramMapping = this.createParamMapping(op.pathParams, methodParams)
+    const finalTemplate = this.applyParamMapping(pathTemplate, paramMapping)
     const method = op.method === 'patch' ? 'patch' : 'put'
 
     const jsdoc = this.options.includeJSDoc
@@ -252,8 +258,8 @@ ${methods.join(',\n\n')}
 `
       : ''
 
-    return `${jsdoc}  async update(id: string, data: ${requestType}): Promise<${returnType}> {
-    return await apiClient.${method}<${returnType}>(\`${pathTemplate}\`, data)
+    return `${jsdoc}  async update(${methodParams.join(', ')}, data: ${requestType}): Promise<${returnType}> {
+    return await apiClient.${method}<${returnType}>(\`${finalTemplate}\`, data)
   }`
   }
 
@@ -263,6 +269,9 @@ ${methods.join(',\n\n')}
   private generateDeleteMethod(entity: EntityDefinition): string {
     const op = entity.operations.delete!
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
+    const methodParams = this.buildMethodParams(op.pathParams)
+    const paramMapping = this.createParamMapping(op.pathParams, methodParams)
+    const finalTemplate = this.applyParamMapping(pathTemplate, paramMapping)
 
     const jsdoc = this.options.includeJSDoc
       ? `  /**
@@ -271,8 +280,8 @@ ${methods.join(',\n\n')}
 `
       : ''
 
-    return `${jsdoc}  async delete(id: string): Promise<void> {
-    return await apiClient.delete<void>(\`${pathTemplate}\`)
+    return `${jsdoc}  async delete(${methodParams.join(', ')}): Promise<void> {
+    return await apiClient.delete<void>(\`${finalTemplate}\`)
   }`
   }
 
@@ -310,16 +319,15 @@ ${methods.join(',\n\n')}
    */
   private generateCustomMethod(entity: EntityDefinition, op: OperationDefinition): string {
     const methodName = this.operationIdToMethodName(op.operationId, entity.name)
-    const hasPathParam = op.pathParams.length > 0
     const hasRequestBody = op.requestSchema !== undefined
     const returnType = op.responseSchema?.name || 'void'
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
+    const methodParams = this.buildMethodParams(op.pathParams)
+    const paramMapping = this.createParamMapping(op.pathParams, methodParams)
+    const finalTemplate = this.applyParamMapping(pathTemplate, paramMapping)
 
     // Build parameters
-    const params: string[] = []
-    if (hasPathParam) {
-      params.push('id: string')
-    }
+    const params: string[] = [...methodParams]
     if (hasRequestBody) {
       params.push(`data: ${op.requestSchema!.name}`)
     }
@@ -336,28 +344,33 @@ ${methods.join(',\n\n')}
       : ''
 
     return `${jsdoc}  async ${methodName}(${params.join(', ')}): Promise<${returnType}> {
-    return await apiClient.${httpMethod}<${returnType}>(\`${pathTemplate}\`${args})
+    return await apiClient.${httpMethod}<${returnType}>(\`${finalTemplate}\`${args})
   }`
   }
 
   /**
    * Convert operationId to method name
-   * e.g., "transition_account_stage" → "transitionStage"
+   *
+   * FastAPI operationIds follow this structure:
+   *   get_allowed_stage_transitions_api_v1_accounts__account_id__stages_allowed_get
+   *   │___________________________│ │____________________________________________│
+   *        Function name                Auto-appended path + method
+   *
+   * We strip everything from _api_v onwards to get the semantic function name.
+   *
+   * @example
+   * "get_allowed_stage_transitions_api_v1_accounts__account_id__stages_allowed_get"
+   *   → "getAllowedStageTransitions"
    */
-  private operationIdToMethodName(operationId: string, entityName: string): string {
-    const singular = this.singularize(entityName)
-
-    // Remove entity name from various positions
-    let name = operationId
-      // Remove from start: account_transition → transition
-      .replace(new RegExp(`^(${entityName}|${singular})_`, 'i'), '')
-      // Remove from end: transition_account → transition
-      .replace(new RegExp(`_(${entityName}|${singular})$`, 'i'), '')
-      // Remove from middle: transition_account_stage → transition_stage
-      .replace(new RegExp(`_(${entityName}|${singular})_`, 'gi'), '_')
+  private operationIdToMethodName(operationId: string, _entityName: string): string {
+    // Strip the _api_v{N}..._{method} suffix that FastAPI auto-appends
+    const cleanName = operationId
+      .replace(/_api_v\d+.*$/, '') // Remove everything from _api_v onwards
+      .replace(/_+$/, '') // Clean up any trailing underscores
+      .trim()
 
     // Convert to camelCase
-    return name
+    return cleanName
       .split('_')
       .map((part, i) => (i === 0 ? part.toLowerCase() : this.capitalize(part)))
       .join('')
@@ -372,10 +385,56 @@ ${methods.join(',\n\n')}
   ): string {
     let template = path
     for (const param of pathParams) {
-      // Replace {param_name} with ${id}
-      template = template.replace(`{${param.name}}`, '${id}')
+      // Replace {param_name} with ${param_name}
+      template = template.replace(`{${param.name}}`, `\${${param.name}}`)
     }
     return template
+  }
+
+  /**
+   * Build parameter list for method signature
+   * For single param ending in '_id', use 'id' for cleaner API
+   * For multiple params or non-id params, use exact names
+   */
+  private buildMethodParams(pathParams: OperationDefinition['pathParams']): string[] {
+    if (pathParams.length === 0) return []
+
+    // Single parameter ending in _id -> use 'id' for clean API
+    if (pathParams.length === 1 && pathParams[0].name.endsWith('_id')) {
+      return ['id: string']
+    }
+
+    // Multiple parameters or non-standard names -> use exact names
+    return pathParams.map(param => `${param.name}: string`)
+  }
+
+  /**
+   * Create mapping for path template when params are renamed
+   * e.g., if param is 'account_id' but method takes 'id', return mapping
+   */
+  private createParamMapping(
+    pathParams: OperationDefinition['pathParams'],
+    methodParams: string[]
+  ): Map<string, string> {
+    const mapping = new Map<string, string>()
+
+    if (pathParams.length === 1 && methodParams.length === 1 && methodParams[0].startsWith('id:')) {
+      // Single param renamed to 'id'
+      mapping.set(pathParams[0].name, 'id')
+    }
+
+    return mapping
+  }
+
+  /**
+   * Apply parameter mapping to path template
+   */
+  private applyParamMapping(template: string, mapping: Map<string, string>): string {
+    let result = template
+    for (const [original, renamed] of mapping) {
+      result = result.replace(`\${${original}}`, `\${${renamed}}`)
+    }
+    return result
   }
 
   /**

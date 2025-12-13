@@ -78,7 +78,19 @@ export class EntityResolver {
     model: EntityModel,
     spec: OpenAPIV3.Document
   ): void {
-    const entityName = this.detectEntityFromPath(path)
+    // Detect entity name from first operation's tags (or fallback to path)
+    const methods: HttpMethod[] = ['get', 'post', 'put', 'patch', 'delete']
+    let entityName: string | null = null
+
+    // Try to detect entity from first available operation
+    for (const method of methods) {
+      const operation = pathItem[method] as OpenAPIV3.OperationObject | undefined
+      if (operation) {
+        entityName = this.detectEntityFromOperation(path, operation)
+        if (entityName) break
+      }
+    }
+
     if (!entityName) return
 
     // Get or create entity definition
@@ -95,10 +107,12 @@ export class EntityResolver {
     }
 
     // Process each HTTP method
-    const methods: HttpMethod[] = ['get', 'post', 'put', 'patch', 'delete']
     for (const method of methods) {
       const operation = pathItem[method] as OpenAPIV3.OperationObject | undefined
       if (!operation) continue
+
+      // Skip system operations (health checks, auth, etc.)
+      if (this.isSystemOperation(operation)) continue
 
       this.processOperation(path, method, operation, entity, spec)
     }
@@ -114,8 +128,9 @@ export class EntityResolver {
     entity: EntityDefinition,
     spec: OpenAPIV3.Document
   ): void {
-    const operationType = this.detectOperationType(method, path, operation.operationId || '')
-    const opDef = this.createOperationDefinition(path, method, operation, spec)
+    const operationType = this.detectOperationType(method, path, operation, entity.name, spec)
+    const pathItem = spec.paths?.[path] as OpenAPIV3.PathItemObject
+    const opDef = this.createOperationDefinition(path, method, operation, pathItem, spec)
 
     switch (operationType) {
       case 'list':
@@ -174,6 +189,7 @@ export class EntityResolver {
     path: string,
     method: HttpMethod,
     operation: OpenAPIV3.OperationObject,
+    pathItem: OpenAPIV3.PathItemObject,
     spec: OpenAPIV3.Document
   ): OperationDefinition {
     const pathParams = this.extractPathParams(operation.parameters, spec)
@@ -190,7 +206,7 @@ export class EntityResolver {
       queryParams,
       requestSchema,
       responseSchema,
-      requiresAuth: this.operationRequiresAuth(operation),
+      requiresAuth: this.operationRequiresAuth(operation, pathItem, spec),
     }
   }
 
@@ -215,36 +231,89 @@ export class EntityResolver {
   }
 
   /**
-   * Detect operation type from method, path, and operationId
+   * Detect operation type using operationId patterns
+   *
+   * Uses the explicit operationId from the OpenAPI spec rather than
+   * inferring from path patterns. This is more reliable because:
+   * - Backend explicitly names operations
+   * - Catches collection-level custom endpoints (e.g., /accounts/stages)
+   * - No fragile path pattern matching
    */
   private detectOperationType(
     method: HttpMethod,
     path: string,
-    operationId: string
+    operation: OpenAPIV3.OperationObject,
+    entityName: string,
+    spec: OpenAPIV3.Document
   ): OperationType {
-    // Check for metadata endpoint
-    if (path.includes('/metadata') || path.includes('/fields/metadata')) {
+    const operationId = operation.operationId || ''
+
+    // Extract operation name: "list_accounts_api_v1_accounts_get" → "list_accounts"
+    const opName = this.extractOperationName(operationId)
+    const singular = this.singularize(entityName)
+
+    // Check for metadata endpoint (explicit path check is fine here)
+    if (path.includes('/fields/metadata')) {
       return 'metadata'
     }
 
-    // Check for path parameters (indicates single-resource operation)
-    const hasPathParam = path.includes('{')
+    // CRUD detection by operationId prefix
+    // Match against both plural (accounts) and singular (account) entity names
+    const entityPattern = new RegExp(`(${entityName}|${singular})`, 'i')
 
-    // Check for sub-resource paths like /accounts/{id}/transition
-    const segments = path.split('/').filter(Boolean)
-    const lastSegment = segments[segments.length - 1]
-    const isSubResource = hasPathParam && !lastSegment.startsWith('{') && lastSegment !== 'fields'
+    if (opName.startsWith('list_') && entityPattern.test(opName)) {
+      return 'list'
+    }
 
-    if (isSubResource) {
+    if (opName.startsWith('create_') && entityPattern.test(opName)) {
+      return 'create'
+    }
+
+    // 'get_' can be either single-item get (with {id}) or collection list (without {id})
+    // e.g., "get_account" with {id} is CRUD get, "get_public_data" without {id} is list
+    if (opName.startsWith('get_') && entityPattern.test(opName)) {
+      const hasEntityIdParam = this.operationHasIdParam(operation, spec)
+      return hasEntityIdParam ? 'get' : 'list'
+    }
+
+    if (opName.startsWith('update_') && entityPattern.test(opName)) {
+      return 'update'
+    }
+
+    // Only explicit 'delete_' is CRUD delete; 'archive_' is a custom soft-delete operation
+    if (opName.startsWith('delete_') && entityPattern.test(opName)) {
+      return 'delete'
+    }
+
+    // If operationId doesn't mention the entity at all, it's likely a custom operation
+    // e.g., "get_stage_metadata" under /accounts/stages is custom, not CRUD
+    if (operationId && !entityPattern.test(opName)) {
       return 'custom'
     }
 
-    // Standard CRUD detection
+    // Fallback: use method + path pattern for specs without conventional operationIds
+    // This handles legacy specs where operationId mentions entity but without list_/create_ prefix
+    // e.g., "get_public_data" for GET /public (should be list since no {id} param)
+    return this.detectOperationTypeByMethodAndPath(method, path, operation, spec)
+  }
+
+  /**
+   * Fallback operation type detection using HTTP method and path pattern
+   * Used when operationId doesn't follow standard naming conventions
+   */
+  private detectOperationTypeByMethodAndPath(
+    method: HttpMethod,
+    path: string,
+    operation: OpenAPIV3.OperationObject,
+    spec: OpenAPIV3.Document
+  ): OperationType {
+    const hasEntityIdParam = this.operationHasIdParam(operation, spec)
+
     switch (method) {
       case 'get':
-        return hasPathParam ? 'get' : 'list'
+        return hasEntityIdParam ? 'get' : 'list'
       case 'post':
-        return hasPathParam ? 'custom' : 'create'
+        return hasEntityIdParam ? 'custom' : 'create'
       case 'put':
       case 'patch':
         return 'update'
@@ -253,6 +322,61 @@ export class EntityResolver {
       default:
         return 'custom'
     }
+  }
+
+  /**
+   * Extract operation name from operationId
+   * "list_accounts_api_v1_accounts_get" → "list_accounts"
+   */
+  private extractOperationName(operationId: string): string {
+    // Split on _api_ to get the operation name part
+    const parts = operationId.split('_api_')
+    return parts[0] || operationId
+  }
+
+  /**
+   * Check if operation has an ID parameter using structured parameter data
+   *
+   * This method uses the operation.parameters array instead of regex on the path string,
+   * which is more reliable because:
+   * - Uses the structured OpenAPI spec data
+   * - Avoids fragile regex matching
+   * - Works with any parameter naming convention
+   */
+  private operationHasIdParam(
+    operation: OpenAPIV3.OperationObject,
+    spec: OpenAPIV3.Document
+  ): boolean {
+    const pathParams = this.extractPathParams(operation.parameters, spec)
+    return pathParams.some(p =>
+      p.name === 'id' ||
+      p.name.endsWith('_id') ||
+      p.name.endsWith('Id')
+    )
+  }
+
+  /**
+   * Check if path has an entity ID parameter (legacy fallback)
+   * /accounts/{account_id} → true
+   * /accounts/stages → false
+   *
+   * @deprecated Use operationHasIdParam instead
+   */
+  private pathHasEntityIdParam(path: string, entityName: string): boolean {
+    const singular = this.singularize(entityName)
+    // Match patterns like {account_id}, {accountId}, {id}
+    const idPattern = new RegExp(`\\{(${singular}_id|${singular}Id|id)\\}`, 'i')
+    return idPattern.test(path)
+  }
+
+  /**
+   * Simple singularize - handles common patterns
+   */
+  private singularize(name: string): string {
+    if (name.endsWith('ies')) return name.slice(0, -3) + 'y'
+    if (name.endsWith('es') && !name.endsWith('ses')) return name.slice(0, -2)
+    if (name.endsWith('s')) return name.slice(0, -1)
+    return name
   }
 
   /**
@@ -467,9 +591,47 @@ export class EntityResolver {
 
   /**
    * Check if operation requires authentication
+   *
+   * Checks security at three levels (in order of precedence):
+   * 1. Operation-level security (operation.security)
+   * 2. Path-level security (pathItem.security)
+   * 3. Global security (spec.security)
+   *
+   * Note: An explicit empty array [] means "no auth required" (overrides global)
    */
-  private operationRequiresAuth(operation: OpenAPIV3.OperationObject): boolean {
-    return Array.isArray(operation.security) && operation.security.length > 0
+  private operationRequiresAuth(
+    operation: OpenAPIV3.OperationObject,
+    pathItem: OpenAPIV3.PathItemObject,
+    spec: OpenAPIV3.Document
+  ): boolean {
+    // Check operation-level security first
+    if (operation.security !== undefined) {
+      // Explicit empty array means "no auth required" (overrides global/path)
+      if (Array.isArray(operation.security) && operation.security.length === 0) {
+        return false
+      }
+      // Non-empty array means auth is required
+      return Array.isArray(operation.security) && operation.security.length > 0
+    }
+
+    // Check path-level security next
+    if (pathItem.security !== undefined) {
+      if (Array.isArray(pathItem.security) && pathItem.security.length === 0) {
+        return false
+      }
+      return Array.isArray(pathItem.security) && pathItem.security.length > 0
+    }
+
+    // Check global security last
+    if (spec.security !== undefined) {
+      if (Array.isArray(spec.security) && spec.security.length === 0) {
+        return false
+      }
+      return Array.isArray(spec.security) && spec.security.length > 0
+    }
+
+    // No security defined anywhere - no auth required
+    return false
   }
 
   /**
@@ -513,5 +675,84 @@ export class EntityResolver {
   private isSystemPath(segment: string): boolean {
     const systemPaths = ['health', 'ready', 'docs', 'openapi', 'redoc', 'auth', 'login', 'logout']
     return systemPaths.includes(segment.toLowerCase())
+  }
+
+  /**
+   * Check if tag looks like a system tag
+   */
+  private isSystemTag(tag: string): boolean {
+    const systemTags = ['health', 'system', 'internal', 'auth', 'authentication', 'docs', 'default', 'utility']
+    return systemTags.includes(tag.toLowerCase())
+  }
+
+  /**
+   * Check if operation is a system operation based on tags
+   *
+   * System operations (health checks, auth, docs, etc.) should be filtered out
+   * from entity processing. This method uses OpenAPI tags as the primary
+   * detection mechanism.
+   */
+  private isSystemOperation(operation: OpenAPIV3.OperationObject): boolean {
+    const tags = operation.tags?.map(t => t.toLowerCase()) || []
+    return tags.some(tag => this.isSystemTag(tag))
+  }
+
+  /**
+   * Detect entity name from operation using tags as primary source
+   *
+   * Uses OpenAPI tags (explicit grouping from backend) as the primary source
+   * for entity detection, with path parsing as a fallback. This is more reliable
+   * because tags are explicitly set by the backend developer.
+   *
+   * Examples:
+   * - Tag "Accounts" → "accounts" (single word, use as-is)
+   * - Tag "Legacy" → "legacy" (single word, use as-is)
+   * - Tag "Account Fields" → "accounts" (multi-word, use first word pluralized)
+   * - No tags → falls back to path parsing
+   */
+  private detectEntityFromOperation(
+    path: string,
+    operation: OpenAPIV3.OperationObject
+  ): string | null {
+    // Primary: use tags (explicit grouping from backend)
+    const tags = operation.tags
+    if (tags && tags.length > 0) {
+      // Normalize tag to entity name
+      const tag = tags[0].toLowerCase()
+
+      // Skip system tags
+      if (this.isSystemTag(tag)) return null
+
+      // Check if multi-word tag
+      const words = tag.split(/[\s-]/)
+
+      if (words.length === 1) {
+        // Single-word tag: use as-is (already in intended form)
+        // "Accounts" → "accounts", "Legacy" → "legacy"
+        return tag
+      } else {
+        // Multi-word tag: take first word and pluralize
+        // "Account Fields" → "accounts"
+        const firstWord = words[0]
+        return this.pluralize(firstWord)
+      }
+    }
+
+    // Fallback: path parsing for specs without tags
+    return this.detectEntityFromPath(path)
+  }
+
+  /**
+   * Simple pluralize - handles common patterns
+   */
+  private pluralize(name: string): string {
+    // Already plural
+    if (name.endsWith('s')) return name
+    // Consonant + y → ies (e.g., "category" → "categories")
+    if (name.endsWith('y') && name.length > 1 && !/[aeiou]/.test(name[name.length - 2])) {
+      return name.slice(0, -1) + 'ies'
+    }
+    // Default: add 's'
+    return name + 's'
   }
 }
