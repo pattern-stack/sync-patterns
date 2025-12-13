@@ -1,6 +1,6 @@
 # SYNC-010: Generator Architecture Rebuild
 
-> **Status**: IN PROGRESS
+> **Status**: COMPLETE
 > **Created**: 2025-12-11
 > **Updated**: 2025-12-13
 > **Author**: Claude + Dug
@@ -9,18 +9,21 @@
 
 | Phase | Component | Tests | Status |
 |-------|-----------|-------|--------|
-| 1 | EntityModel + EntityResolver | 24 | ✅ Complete |
-| 2 | ApiGenerator | 25 | ✅ Complete |
+| 1 | EntityModel + EntityResolver | 34 | ✅ Complete |
+| 2 | ApiGenerator | 30 | ✅ Complete |
 | 3 | HookGenerator | 25 | ✅ Complete |
-| 4 | SchemaGenerator | - | 🔮 Deferred |
-| 5 | Integration | 18 | ✅ Complete |
-| **Total** | | **92** | |
+| 4 | SchemaGenerator | - | 🔮 Deferred (existing works) |
+| 5 | CLI Wiring | - | ✅ Complete |
+| 6 | OpenAPI Types Refactor | - | ✅ Complete |
+| **Total** | | **229** | |
 
 ### Completed Work
 
 **Branch**: `refactor/generator-rebuild`
 
 ```
+bdb8ede feat(core): wire CLI to new generators + refactor to use OpenAPI types
+4274433 docs: update SYNC-010 spec with progress and next steps
 8b6b263 test(core): add integration tests with sales-patterns spec
 a87c5ec feat(core): add HookGenerator (Phase 3)
 739b1e9 feat(core): add ApiGenerator (Phase 2)
@@ -28,25 +31,30 @@ a87c5ec feat(core): add HookGenerator (Phase 3)
 8ff6a3e docs: add SYNC-010 generator rebuild spec
 ```
 
-**Files Created**:
+**Files Created/Modified**:
 ```
 src/core/
 ├── entity-model.ts      # Core types
-├── entity-resolver.ts   # OpenAPI → EntityModel
+├── entity-resolver.ts   # OpenAPI → EntityModel (uses tags, not path parsing)
 ├── api-generator.ts     # EntityModel → Pure TS API
 ├── hook-generator.ts    # EntityModel → React hooks
 └── index.ts
 
+src/cli/
+├── commands/generate.ts # --use-new-generators flag
+└── index.ts             # CLI flag definition
+
 test/core/
-├── entity-resolver.test.ts   (24 tests)
-├── api-generator.test.ts     (25 tests)
+├── entity-resolver.test.ts   (34 tests)
+├── api-generator.test.ts     (30 tests)
 ├── hook-generator.test.ts    (25 tests)
-└── integration.test.ts       (18 tests)
+└── integration.test.ts       (19 tests)
 
 test/fixtures/
 ├── minimal-crud.json
 ├── with-sync-modes.json
 ├── with-custom-operations.json
+├── with-security-*.json      # Security test fixtures
 ├── nested-resources.json
 └── sales-patterns-openapi.json
 ```
@@ -689,15 +697,15 @@ describe('Full Pipeline Integration', () => {
 
 ## Success Criteria
 
-- [x] All EntityResolver tests pass (24 tests)
-- [x] All ApiGenerator tests pass (25 tests)
+- [x] All EntityResolver tests pass (34 tests)
+- [x] All ApiGenerator tests pass (30 tests)
 - [x] All HookGenerator tests pass (25 tests)
 - [ ] All SchemaGenerator tests pass (deferred - existing zod-generator works)
-- [x] Integration test with sales-patterns spec passes (18 tests)
+- [x] Integration test with sales-patterns spec passes (19 tests)
 - [ ] TUI can use generated api layer
-- [ ] Generated code type-checks cleanly
-- [ ] CLI wired up to new generators
-- [ ] No regression in existing functionality
+- [x] Generated code type-checks cleanly
+- [x] CLI wired up to new generators (`--use-new-generators` flag)
+- [x] No regression in existing functionality (229 tests passing)
 
 ## Decisions Made
 
@@ -722,17 +730,26 @@ describe('Full Pipeline Integration', () => {
    - ✅ Decision: Operation > Path > Global security
    - Rationale: Matches OpenAPI spec semantics, explicit empty array = no auth
 
+6. **Use OpenAPI structured types, not string parsing**
+   - ✅ Decision: Entity detection from `operation.tags` (not path parsing)
+   - ✅ Decision: Path param detection from `operation.parameters` (not regex)
+   - ✅ Decision: System operation detection from tags (not hardcoded paths)
+   - ✅ Decision: CRUD detection from `operationId` prefix (list_, create_, get_, etc.)
+   - Rationale: Uses explicit backend declarations, more reliable than inferring from paths
+
+7. **Fallback for legacy specs**
+   - ✅ Decision: When operationId doesn't follow conventions, fallback to method+path
+   - Rationale: Backward compatibility with specs that don't use standard naming
+
 ## Next Steps
 
-### Immediate (Wire Up)
+### Immediate
 
-1. **Wire CLI to new generators**
-   ```bash
-   # Update src/cli/commands/generate.ts
-   # Use EntityResolver + ApiGenerator + HookGenerator
-   ```
+1. ~~**Wire CLI to new generators**~~ ✅ Done
+   - `--use-new-generators` flag implemented
+   - Outputs to `api/` and `hooks/` (entity-grouped)
 
-2. **Update TUI to use generated API layer**
+2. **Update TUI to use generated API layer** (SYNC-012)
    ```typescript
    // EntityTableView.tsx
    import { accountsApi, configureApi } from './generated/api'
@@ -741,10 +758,10 @@ describe('Full Pipeline Integration', () => {
    const { data, columns } = await accountsApi.listWithMeta()
    ```
 
-3. **Test with sales-patterns**
-   - Regenerate sales-patterns frontend
-   - Verify no regressions
-   - Verify TUI works with new layer
+3. **Make new generators default**
+   - Test with more projects
+   - Add `--use-legacy-generators` flag
+   - Make new generators the default
 
 ### Future (When Needed)
 
