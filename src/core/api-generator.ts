@@ -447,15 +447,25 @@ ${methods.join(',\n\n')}
  * Auto-generated from OpenAPI specification.
  * Do not edit manually - regenerate using sync-patterns CLI.
  *
- * Configurable HTTP client for API calls.
+ * Features:
+ * - Dynamic auth token (callback or localStorage fallback)
+ * - Configurable timeout
+ * - Retry with exponential backoff
+ * - Structured error handling
+ * - Request/response callbacks
  */
 
-import type { ApiConfig } from './types.js'
+import type { ApiConfig, ApiError, RequestConfig, RequestOptions } from './types.js'
 
-let config: ApiConfig = {
+// Default configuration
+const DEFAULT_CONFIG: ApiConfig = {
   baseUrl: '',
-  authToken: undefined,
+  timeout: 10000,
+  retries: 3,
+  authTokenKey: 'auth_token',
 }
+
+let config: ApiConfig = { ...DEFAULT_CONFIG }
 
 /**
  * Configure the API client
@@ -463,7 +473,9 @@ let config: ApiConfig = {
  * @example
  * configureApi({
  *   baseUrl: 'http://localhost:8000/api/v1',
- *   authToken: 'your-jwt-token',
+ *   timeout: 5000,
+ *   getAuthToken: () => localStorage.getItem('my_token'),
+ *   onAuthError: () => window.location.href = '/login',
  * })
  */
 export function configureApi(newConfig: Partial<ApiConfig>): void {
@@ -478,69 +490,95 @@ export function getApiConfig(): ApiConfig {
 }
 
 /**
- * Internal HTTP client
+ * Get auth token - uses callback if provided, otherwise reads from localStorage
  */
-export const apiClient = {
-  async get<T>(path: string): Promise<T> {
-    const response = await fetch(\`\${config.baseUrl}\${path}\`, {
-      method: 'GET',
-      headers: buildHeaders(),
-    })
-    return handleResponse<T>(response)
-  },
-
-  async post<T>(path: string, data?: unknown): Promise<T> {
-    const response = await fetch(\`\${config.baseUrl}\${path}\`, {
-      method: 'POST',
-      headers: buildHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    })
-    return handleResponse<T>(response)
-  },
-
-  async put<T>(path: string, data?: unknown): Promise<T> {
-    const response = await fetch(\`\${config.baseUrl}\${path}\`, {
-      method: 'PUT',
-      headers: buildHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    })
-    return handleResponse<T>(response)
-  },
-
-  async patch<T>(path: string, data?: unknown): Promise<T> {
-    const response = await fetch(\`\${config.baseUrl}\${path}\`, {
-      method: 'PATCH',
-      headers: buildHeaders(),
-      body: data ? JSON.stringify(data) : undefined,
-    })
-    return handleResponse<T>(response)
-  },
-
-  async delete<T>(path: string): Promise<T> {
-    const response = await fetch(\`\${config.baseUrl}\${path}\`, {
-      method: 'DELETE',
-      headers: buildHeaders(),
-    })
-    return handleResponse<T>(response)
-  },
-}
-
-function buildHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+async function getAuthToken(): Promise<string | null> {
+  // Use custom getter if provided
+  if (config.getAuthToken) {
+    const token = config.getAuthToken()
+    return token instanceof Promise ? await token : token
   }
 
-  if (config.authToken) {
-    headers['Authorization'] = \`Bearer \${config.authToken}\`
+  // Fallback to localStorage
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem(config.authTokenKey || 'auth_token')
+  }
+
+  return null
+}
+
+/**
+ * Build request headers
+ */
+async function buildHeaders(options?: RequestOptions): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...config.defaultHeaders,
+    ...options?.headers,
+  }
+
+  const token = await getAuthToken()
+  if (token) {
+    headers['Authorization'] = \`Bearer \${token}\`
   }
 
   return headers
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
+/**
+ * Create structured API error
+ */
+function createApiError(
+  message: string,
+  status?: number,
+  statusText?: string,
+  data?: unknown,
+  url?: string,
+  method?: string
+): ApiError {
+  const error: ApiError = {
+    message,
+    status,
+    statusText,
+    data,
+    config: { url, method },
+  }
+
+  // Call error callback if configured
+  config.onError?.(error)
+
+  // Call auth error callback for 401/403
+  if ((status === 401 || status === 403) && config.onAuthError) {
+    config.onAuthError(error)
+  }
+
+  return error
+}
+
+/**
+ * Handle fetch response
+ */
+async function handleResponse<T>(response: Response, url: string, method: string): Promise<T> {
   if (!response.ok) {
-    const error = await response.text().catch(() => response.statusText)
-    throw new Error(\`API Error \${response.status}: \${error}\`)
+    let errorData: unknown
+    let errorMessage = response.statusText
+
+    try {
+      errorData = await response.json()
+      // Extract message from common error response formats
+      if (typeof errorData === 'object' && errorData !== null) {
+        const data = errorData as Record<string, unknown>
+        errorMessage = (data.detail || data.message || data.error || response.statusText) as string
+      }
+    } catch {
+      try {
+        errorMessage = await response.text()
+      } catch {
+        // Use statusText as fallback
+      }
+    }
+
+    throw createApiError(errorMessage, response.status, response.statusText, errorData, url, method)
   }
 
   // Handle 204 No Content
@@ -549,6 +587,140 @@ async function handleResponse<T>(response: Response): Promise<T> {
   }
 
   return response.json() as Promise<T>
+}
+
+/**
+ * Build query string from params
+ */
+function buildQueryString(params?: Record<string, string | number | boolean | undefined>): string {
+  if (!params || Object.keys(params).length === 0) {
+    return ''
+  }
+
+  const query = Object.entries(params)
+    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => \`\${encodeURIComponent(key)}=\${encodeURIComponent(String(value))}\`)
+    .join('&')
+
+  return query ? \`?\${query}\` : ''
+}
+
+/**
+ * Execute request with retry logic and interceptors
+ */
+async function executeWithRetry<T>(
+  method: string,
+  path: string,
+  options?: RequestOptions & { body?: string }
+): Promise<T> {
+  const queryString = buildQueryString(options?.params)
+  const url = \`\${config.baseUrl}\${path}\${queryString}\`
+  const maxRetries = config.retries ?? 3
+  let lastError: ApiError | undefined
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController()
+      const timeout = options?.timeout ?? config.timeout ?? 10000
+
+      const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+      const headers = await buildHeaders(options)
+
+      // Build request config for interceptors
+      let requestConfig: RequestConfig = {
+        method,
+        url,
+        headers,
+        body: options?.body,
+      }
+
+      // Call request interceptor if configured
+      if (config.onRequest) {
+        requestConfig = await Promise.resolve(config.onRequest(requestConfig))
+      }
+
+      const response = await fetch(requestConfig.url, {
+        method: requestConfig.method,
+        headers: requestConfig.headers,
+        body: requestConfig.body,
+        signal: options?.signal ?? controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+      let result = await handleResponse<T>(response, requestConfig.url, requestConfig.method)
+
+      // Call response interceptor if configured
+      if (config.onResponse) {
+        result = await Promise.resolve(config.onResponse(result, requestConfig))
+      }
+
+      return result
+    } catch (error) {
+      // Don't retry on abort
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw createApiError('Request timeout', undefined, undefined, undefined, url, method)
+      }
+
+      // Don't retry on client errors (4xx)
+      if (isApiError(error) && error.status && error.status >= 400 && error.status < 500) {
+        throw error
+      }
+
+      lastError = isApiError(error)
+        ? error
+        : createApiError(
+            error instanceof Error ? error.message : 'Unknown error',
+            undefined, undefined, undefined, url, method
+          )
+
+      // Retry with exponential backoff for server errors or network failures
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+  }
+
+  throw lastError ?? createApiError('Request failed after retries', undefined, undefined, undefined, url, method)
+}
+
+function isApiError(error: unknown): error is ApiError {
+  return typeof error === 'object' && error !== null && 'message' in error && 'config' in error
+}
+
+/**
+ * API client with typed methods
+ */
+export const apiClient = {
+  async get<T>(path: string, options?: RequestOptions): Promise<T> {
+    return executeWithRetry<T>('GET', path, options)
+  },
+
+  async post<T>(path: string, data?: unknown, options?: RequestOptions): Promise<T> {
+    return executeWithRetry<T>('POST', path, {
+      ...options,
+      body: data ? JSON.stringify(data) : undefined,
+    })
+  },
+
+  async put<T>(path: string, data?: unknown, options?: RequestOptions): Promise<T> {
+    return executeWithRetry<T>('PUT', path, {
+      ...options,
+      body: data ? JSON.stringify(data) : undefined,
+    })
+  },
+
+  async patch<T>(path: string, data?: unknown, options?: RequestOptions): Promise<T> {
+    return executeWithRetry<T>('PATCH', path, {
+      ...options,
+      body: data ? JSON.stringify(data) : undefined,
+    })
+  },
+
+  async delete<T>(path: string, options?: RequestOptions): Promise<T> {
+    return executeWithRetry<T>('DELETE', path, options)
+  },
 }
 `
   }
@@ -570,8 +742,114 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export interface ApiConfig {
   /** Base URL for API calls (e.g., 'http://localhost:8000/api/v1') */
   baseUrl: string
-  /** JWT auth token (optional) */
-  authToken?: string
+
+  /** Request timeout in milliseconds (default: 10000) */
+  timeout?: number
+
+  /** Number of retry attempts for failed requests (default: 3) */
+  retries?: number
+
+  /** Key for auth token in localStorage (default: 'auth_token') */
+  authTokenKey?: string
+
+  /** Default headers for all requests */
+  defaultHeaders?: Record<string, string>
+
+  /**
+   * Custom auth token getter. If provided, this is used instead of localStorage.
+   * Useful for apps using cookies, memory storage, or custom auth flows.
+   *
+   * @example
+   * getAuthToken: () => sessionStorage.getItem('token')
+   * getAuthToken: async () => await authService.getValidToken()
+   */
+  getAuthToken?: () => string | null | Promise<string | null>
+
+  /**
+   * Callback when any API error occurs
+   */
+  onError?: (error: ApiError) => void
+
+  /**
+   * Callback when auth error (401/403) occurs.
+   * Use this to redirect to login or refresh tokens.
+   *
+   * @example
+   * onAuthError: () => window.location.href = '/login'
+   */
+  onAuthError?: (error: ApiError) => void
+
+  /**
+   * Request interceptor - called before each request.
+   * Can modify the request config or perform side effects (logging).
+   *
+   * @example
+   * onRequest: (config) => { console.log('Request:', config.method, config.url); return config }
+   */
+  onRequest?: (config: RequestConfig) => RequestConfig | Promise<RequestConfig>
+
+  /**
+   * Response interceptor - called after successful responses.
+   * Can transform the response data or perform side effects.
+   *
+   * @example
+   * onResponse: (response, config) => { console.log('Response:', config.url, response); return response }
+   */
+  onResponse?: <T>(response: T, config: RequestConfig) => T | Promise<T>
+}
+
+/**
+ * Request configuration passed to interceptors
+ */
+export interface RequestConfig {
+  /** HTTP method */
+  method: string
+  /** Full URL */
+  url: string
+  /** Request headers */
+  headers: Record<string, string>
+  /** Request body (if any) */
+  body?: string
+}
+
+/**
+ * Request options for individual API calls
+ */
+export interface RequestOptions {
+  /** Query parameters to append to URL */
+  params?: Record<string, string | number | boolean | undefined>
+
+  /** Additional headers for this request */
+  headers?: Record<string, string>
+
+  /** Override timeout for this request */
+  timeout?: number
+
+  /** AbortSignal for request cancellation */
+  signal?: AbortSignal
+}
+
+/**
+ * Structured API error with context
+ */
+export interface ApiError {
+  /** Error message */
+  message: string
+
+  /** HTTP status code (if available) */
+  status?: number
+
+  /** HTTP status text */
+  statusText?: string
+
+  /** Response body data (if available) */
+  data?: unknown
+
+  /** Request context */
+  config: {
+    url?: string
+    method?: string
+  }
 }
 
 /**
@@ -606,7 +884,7 @@ export interface PaginatedResponse<T> {
 
     // Export from client
     exports.push("export { configureApi, getApiConfig, apiClient } from './client.js'")
-    exports.push("export type { ApiConfig, ColumnMetadata, PaginatedResponse } from './types.js'")
+    exports.push("export type { ApiConfig, ApiError, RequestConfig, RequestOptions, ColumnMetadata, PaginatedResponse } from './types.js'")
     exports.push('')
 
     // Export entity APIs
