@@ -606,6 +606,37 @@ function buildQueryString(params?: Record<string, string | number | boolean | un
 }
 
 /**
+ * Combine multiple AbortSignals into one.
+ * Uses AbortSignal.any() if available (modern browsers), otherwise manual fallback.
+ */
+function combineSignals(signals: AbortSignal[]): AbortSignal {
+  // Filter out undefined/null signals
+  const validSignals = signals.filter(Boolean)
+  if (validSignals.length === 0) {
+    return new AbortController().signal
+  }
+  if (validSignals.length === 1) {
+    return validSignals[0]
+  }
+
+  // Use native AbortSignal.any if available (Chrome 116+, Firefox 124+, Safari 17.4+)
+  if ('any' in AbortSignal && typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(validSignals)
+  }
+
+  // Fallback: create a new controller that aborts when any signal aborts
+  const controller = new AbortController()
+  for (const signal of validSignals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+  }
+  return controller.signal
+}
+
+/**
  * Execute request with retry logic and interceptors
  */
 async function executeWithRetry<T>(
@@ -619,12 +650,11 @@ async function executeWithRetry<T>(
   let lastError: ApiError | undefined
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController()
+    const timeout = options?.timeout ?? config.timeout ?? 10000
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
     try {
-      const controller = new AbortController()
-      const timeout = options?.timeout ?? config.timeout ?? 10000
-
-      const timeoutId = setTimeout(() => controller.abort(), timeout)
-
       const headers = await buildHeaders(options)
 
       // Build request config for interceptors
@@ -640,14 +670,20 @@ async function executeWithRetry<T>(
         requestConfig = await Promise.resolve(config.onRequest(requestConfig))
       }
 
+      // Combine timeout signal with user-provided signal
+      const signals: AbortSignal[] = [controller.signal]
+      if (options?.signal) {
+        signals.push(options.signal)
+      }
+
       const response = await fetch(requestConfig.url, {
         method: requestConfig.method,
         headers: requestConfig.headers,
         body: requestConfig.body,
-        signal: options?.signal ?? controller.signal,
+        signal: combineSignals(signals),
+        credentials: config.credentials,
       })
 
-      clearTimeout(timeoutId)
       let result = await handleResponse<T>(response, requestConfig.url, requestConfig.method)
 
       // Call response interceptor if configured
@@ -657,7 +693,12 @@ async function executeWithRetry<T>(
 
       return result
     } catch (error) {
-      // Don't retry on abort
+      // Don't retry on user-initiated abort
+      if (options?.signal?.aborted) {
+        throw createApiError('Request aborted', undefined, undefined, undefined, url, method)
+      }
+
+      // Don't retry on timeout
       if (error instanceof Error && error.name === 'AbortError') {
         throw createApiError('Request timeout', undefined, undefined, undefined, url, method)
       }
@@ -667,18 +708,29 @@ async function executeWithRetry<T>(
         throw error
       }
 
-      lastError = isApiError(error)
-        ? error
-        : createApiError(
-            error instanceof Error ? error.message : 'Unknown error',
-            undefined, undefined, undefined, url, method
-          )
+      // Better network error context
+      if (error instanceof TypeError) {
+        lastError = createApiError(
+          'Network error: unable to reach server. Check your connection and that the server is running.',
+          undefined, undefined, undefined, url, method
+        )
+      } else {
+        lastError = isApiError(error)
+          ? error
+          : createApiError(
+              error instanceof Error ? error.message : 'Unknown error',
+              undefined, undefined, undefined, url, method
+            )
+      }
 
       // Retry with exponential backoff for server errors or network failures
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000
         await new Promise(resolve => setTimeout(resolve, delay))
       }
+    } finally {
+      // Always clean up timeout to prevent memory leaks
+      clearTimeout(timeoutId)
     }
   }
 
@@ -796,6 +848,17 @@ export interface ApiConfig {
    * onResponse: (response, config) => { console.log('Response:', config.url, response); return response }
    */
   onResponse?: <T>(response: T, config: RequestConfig) => T | Promise<T>
+
+  /**
+   * Credentials mode for cross-origin requests.
+   * - 'omit': Never send cookies (default)
+   * - 'same-origin': Send cookies for same-origin requests only
+   * - 'include': Always send cookies, even for cross-origin requests
+   *
+   * @example
+   * credentials: 'include'  // For cross-origin authenticated requests
+   */
+  credentials?: 'omit' | 'same-origin' | 'include'
 }
 
 /**
