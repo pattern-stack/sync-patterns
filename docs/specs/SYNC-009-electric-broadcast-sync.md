@@ -128,113 +128,100 @@ Electric already solves the hard sync problems (Postgres replication, conflict r
 
 ## Implementation Plan
 
-### Phase 1: Backend - WebSocket Broadcast Endpoint
+### Phase 1: Backend - WebSocket Broadcast Backend
 
 **Files to create/modify:**
 
-#### 1.1 WebSocket Router
+#### 1.1 WebSocket Broadcast Backend (Single Module)
 
-**File**: `backend-patterns/pattern_stack/atoms/broadcast/websocket.py`
+**File**: `backend-patterns/pattern_stack/atoms/broadcast/backends/websocket.py`
+
+> **Design Decision**: One module handles both the WebSocket endpoint AND the broadcast backend.
+> No need for a separate wrapper - if you're using WebSocket broadcast, you need both.
 
 ```python
-"""WebSocket endpoint for broadcast subscriptions.
+"""WebSocket broadcast backend with integrated endpoint.
 
-Allows frontend clients to subscribe to broadcast channels
-and receive real-time notifications.
+Provides both:
+1. BroadcastBackend implementation for service layer
+2. FastAPI router with WebSocket endpoint for clients
+
+For multi-server deployments, compose with Redis:
+- Redis handles fan-out across servers
+- Each server pushes to its local WebSocket clients
 """
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from pattern_stack.atoms.broadcast.factory import get_broadcast
 
-router = APIRouter(prefix="/ws", tags=["broadcast"])
-
-# Connected clients: channel -> set of websockets
-_connections: dict[str, set[WebSocket]] = {}
-
-
-@router.websocket("/broadcast")
-async def broadcast_websocket(websocket: WebSocket):
-    """WebSocket endpoint for broadcast subscriptions.
-
-    Protocol:
-    - Client sends: {"subscribe": ["order", "contact"]}
-    - Server sends: {"channel": "order", "event": "item_added", "payload": {...}}
-    """
-    await websocket.accept()
-    subscribed_channels: set[str] = set()
-
-    try:
-        # Handle subscription messages
-        while True:
-            data = await websocket.receive_json()
-
-            if "subscribe" in data:
-                for channel in data["subscribe"]:
-                    subscribed_channels.add(channel)
-                    if channel not in _connections:
-                        _connections[channel] = set()
-                    _connections[channel].add(websocket)
-
-            if "unsubscribe" in data:
-                for channel in data["unsubscribe"]:
-                    subscribed_channels.discard(channel)
-                    if channel in _connections:
-                        _connections[channel].discard(websocket)
-
-    except WebSocketDisconnect:
-        # Clean up subscriptions
-        for channel in subscribed_channels:
-            if channel in _connections:
-                _connections[channel].discard(websocket)
-
-
-async def broadcast_to_websockets(channel: str, event_type: str, payload: dict):
-    """Broadcast event to all WebSocket clients subscribed to channel."""
-    if channel not in _connections:
-        return
-
-    message = {
-        "channel": channel,
-        "event": event_type,
-        "payload": payload,
-    }
-
-    dead_connections = set()
-    for ws in _connections[channel]:
-        try:
-            await ws.send_json(message)
-        except Exception:
-            dead_connections.add(ws)
-
-    # Clean up dead connections
-    _connections[channel] -= dead_connections
-```
-
-#### 1.2 WebSocket Broadcast Backend
-
-**File**: `backend-patterns/pattern_stack/atoms/broadcast/backends/websocket_push.py`
-
-```python
-"""WebSocket-aware broadcast backend.
-
-Wraps another backend (Redis/Memory) and additionally pushes
-to connected WebSocket clients.
-"""
-
-from typing import Any
 from pattern_stack.atoms.broadcast.base import BroadcastBackend, BroadcastHandler
-from pattern_stack.atoms.broadcast.websocket import broadcast_to_websockets
+
+if TYPE_CHECKING:
+    pass
 
 
 class WebSocketBroadcastBackend(BroadcastBackend):
-    """Broadcast backend that pushes to WebSocket clients.
+    """Broadcast backend that pushes directly to WebSocket clients.
 
-    Wraps an underlying backend (Redis for persistence/fan-out)
-    and additionally pushes to connected WebSocket clients.
+    Usage:
+        # Single server
+        backend = WebSocketBroadcastBackend()
+        app.include_router(backend.get_router())
+
+        # Multi-server (compose with Redis)
+        redis = RedisBroadcastBackend(...)
+        websocket = WebSocketBroadcastBackend()
+        backend = CompositeBroadcastBackend([redis, websocket])
     """
 
-    def __init__(self, underlying: BroadcastBackend):
-        self._underlying = underlying
+    def __init__(self):
+        self._connections: dict[str, set[WebSocket]] = {}
+        self._router = self._create_router()
+
+    def get_router(self) -> APIRouter:
+        """Get FastAPI router with WebSocket endpoint."""
+        return self._router
+
+    def _create_router(self) -> APIRouter:
+        router = APIRouter(prefix="/ws", tags=["broadcast"])
+
+        @router.websocket("/broadcast")
+        async def broadcast_websocket(websocket: WebSocket):
+            """WebSocket endpoint for broadcast subscriptions.
+
+            Protocol:
+            - Client sends: {"subscribe": ["order", "contact"]}
+            - Server sends: {"channel": "order", "event": "item_added", "payload": {...}}
+            """
+            await websocket.accept()
+            subscribed_channels: set[str] = set()
+
+            try:
+                while True:
+                    data = await websocket.receive_json()
+
+                    if "subscribe" in data:
+                        for channel in data["subscribe"]:
+                            subscribed_channels.add(channel)
+                            if channel not in self._connections:
+                                self._connections[channel] = set()
+                            self._connections[channel].add(websocket)
+
+                    if "unsubscribe" in data:
+                        for channel in data["unsubscribe"]:
+                            subscribed_channels.discard(channel)
+                            if channel in self._connections:
+                                self._connections[channel].discard(websocket)
+
+            except WebSocketDisconnect:
+                for channel in subscribed_channels:
+                    if channel in self._connections:
+                        self._connections[channel].discard(websocket)
+
+        return router
 
     async def broadcast(
         self,
@@ -242,30 +229,130 @@ class WebSocketBroadcastBackend(BroadcastBackend):
         event_type: str,
         payload: dict[str, Any],
     ) -> None:
-        # Broadcast to underlying (Redis pub/sub for multi-server)
-        await self._underlying.broadcast(channel, event_type, payload)
+        """Push event to all WebSocket clients subscribed to channel."""
+        if channel not in self._connections:
+            return
 
-        # Also push to local WebSocket clients
-        await broadcast_to_websockets(channel, event_type, payload)
+        message = {
+            "channel": channel,
+            "event": event_type,
+            "payload": payload,
+        }
+
+        dead_connections = set()
+        for ws in self._connections[channel]:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead_connections.add(ws)
+
+        self._connections[channel] -= dead_connections
 
     async def subscribe(self, channel: str, handler: BroadcastHandler) -> None:
-        await self._underlying.subscribe(channel, handler)
+        # WebSocket backend doesn't use programmatic subscriptions
+        # Clients subscribe via WebSocket messages
+        pass
 
     async def unsubscribe(self, channel: str) -> None:
-        await self._underlying.unsubscribe(channel)
+        pass
 
     @property
     def supports_push(self) -> bool:
         return True
 
     async def health_check(self) -> bool:
-        return await self._underlying.health_check()
+        return True
 
     async def close(self) -> None:
-        await self._underlying.close()
+        # Close all WebSocket connections
+        for channel_connections in self._connections.values():
+            for ws in channel_connections:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+        self._connections.clear()
 ```
 
-#### 1.3 OpenAPI Extension for Broadcast Config
+#### 1.2 Composite Backend for Multi-Server
+
+**File**: `backend-patterns/pattern_stack/atoms/broadcast/backends/composite.py`
+
+```python
+"""Composite broadcast backend for multi-server deployments."""
+
+from typing import Any
+from pattern_stack.atoms.broadcast.base import BroadcastBackend, BroadcastHandler
+
+
+class CompositeBroadcastBackend(BroadcastBackend):
+    """Broadcasts to multiple backends simultaneously.
+
+    Use for multi-server deployments:
+    - Redis for cross-server fan-out
+    - WebSocket for local client push
+    """
+
+    def __init__(self, backends: list[BroadcastBackend]):
+        self._backends = backends
+
+    async def broadcast(
+        self,
+        channel: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        for backend in self._backends:
+            await backend.broadcast(channel, event_type, payload)
+
+    async def subscribe(self, channel: str, handler: BroadcastHandler) -> None:
+        for backend in self._backends:
+            await backend.subscribe(channel, handler)
+
+    async def unsubscribe(self, channel: str) -> None:
+        for backend in self._backends:
+            await backend.unsubscribe(channel)
+
+    @property
+    def supports_push(self) -> bool:
+        return any(b.supports_push for b in self._backends)
+
+    async def health_check(self) -> bool:
+        return all(await b.health_check() for b in self._backends)
+
+    async def close(self) -> None:
+        for backend in self._backends:
+            await backend.close()
+```
+
+#### 1.3 Factory Update
+
+**File**: `backend-patterns/pattern_stack/atoms/broadcast/factory.py` (modify)
+
+```python
+def get_broadcast() -> BroadcastBackend:
+    """Get configured broadcast backend."""
+    backend = settings.BROADCAST_BACKEND
+
+    if backend == "websocket":
+        # Single server - just WebSocket
+        from .backends.websocket import WebSocketBroadcastBackend
+        return WebSocketBroadcastBackend()
+
+    elif backend == "redis+websocket":
+        # Multi-server - Redis for fan-out + WebSocket for local push
+        from .backends.redis import RedisBroadcastBackend
+        from .backends.websocket import WebSocketBroadcastBackend
+        from .backends.composite import CompositeBroadcastBackend
+
+        redis = RedisBroadcastBackend(redis_url=settings.REDIS_URL)
+        websocket = WebSocketBroadcastBackend()
+        return CompositeBroadcastBackend([redis, websocket])
+
+    # ... existing backends ...
+```
+
+#### 1.4 OpenAPI Extension for Broadcast Config
 
 **File**: `backend-patterns/pattern_stack/atoms/patterns/openapi.py` (modify)
 
@@ -539,6 +626,19 @@ export function useBroadcastSync(options: UseBroadcastSyncOptions): void {
 
 ### Phase 3: Code Generation Updates
 
+> **Note**: Several generators already exist on `main` branch that handle Electric collections,
+> config, and entity wrappers. These were deleted in the `refactor/generator-rebuild` branch
+> but should be restored and extended with broadcast support.
+
+**Existing generators to restore/modify:**
+
+| Generator | Status | Modification Needed |
+|-----------|--------|---------------------|
+| `collection-generator.ts` | Exists on main | Add `broadcast` config to collection options |
+| `config-generator.ts` | Exists on main | Add `broadcastUrl` to SyncConfig |
+| `entity-generator.ts` | Exists on main | Add `live` option and `useBroadcastSync` integration |
+| `sync-provider-generator.ts` | Exists on main | Replace RxDB init with BroadcastProvider |
+
 **Files to modify:**
 
 #### 3.1 Update Parser for Broadcast Config
@@ -570,7 +670,9 @@ private parseEndpoint(path: string, method: HTTPMethod, operation: OpenAPIV3.Ope
 
 #### 3.2 Collection Generator with Broadcast
 
-**File**: `sync-patterns/src/generators/collection-generator.ts` (create)
+**File**: `sync-patterns/src/generators/collection-generator.ts` (restore from main + modify)
+
+> This generator already exists on `main`. Restore it and add broadcast config support.
 
 ```typescript
 /**
@@ -673,7 +775,12 @@ export const ${camelName}Collection = createCollection(
 
 #### 3.3 Entity Hook Generator with Live Option
 
-**File**: `sync-patterns/src/generators/entity-hook-generator.ts` (create)
+**File**: `sync-patterns/src/generators/entity-generator.ts` (restore from main + modify)
+
+> This generator already exists on `main` as `entity-generator.ts`. Restore it and add:
+> - `live` option to generated hooks
+> - `useBroadcastSync` integration for auto-refresh
+> - `isStale` and `refresh` return values
 
 ```typescript
 /**
@@ -1113,3 +1220,4 @@ This architecture provides:
 | Date | Change |
 |------|--------|
 | 2025-12-26 | Initial draft - Electric + Broadcast architecture |
+| 2025-12-26 | Consolidated WebSocket into single module; noted existing generators on main |
