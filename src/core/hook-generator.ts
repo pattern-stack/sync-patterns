@@ -4,6 +4,17 @@
  * Generates React hooks that wrap the API layer.
  * Uses TanStack Query for data fetching and caching.
  *
+ * Phase 3 (SYNC-012): Adds optimistic mutation support with:
+ * - onMutate: Optimistic cache update before API call
+ * - onError: Rollback on failure
+ * - onSettled: Invalidate to sync with server
+ *
+ * Query hooks integrate with useBroadcastInvalidation for real-time updates.
+ *
+ * For entities with syncMode: 'realtime' (local_first: true):
+ * - Mutations emit broadcast events to notify other tabs/clients
+ * - Query hooks subscribe to broadcasts and auto-invalidate
+ *
  * Output structure:
  *   hooks/
  *     accounts.ts   - useAccounts(), useAccount(), useCreateAccount(), etc.
@@ -28,10 +39,19 @@ export interface GeneratedHooks {
 export interface HookGeneratorOptions {
   /** Include JSDoc comments (default: true) */
   includeJSDoc?: boolean
+  /** Enable optimistic mutations (default: true) */
+  optimisticMutations?: boolean
+  /** Enable broadcast integration for query hooks (default: true) */
+  broadcastIntegration?: boolean
+  /** Enable broadcast emission on mutations for realtime entities (default: true) */
+  broadcastOnMutations?: boolean
 }
 
 const DEFAULT_OPTIONS: Required<HookGeneratorOptions> = {
   includeJSDoc: true,
+  optimisticMutations: true,
+  broadcastIntegration: true,
+  broadcastOnMutations: true,
 }
 
 export class HookGenerator {
@@ -125,6 +145,11 @@ export class HookGenerator {
   private generateImports(entity: EntityDefinition): string {
     const imports: string[] = []
 
+    // Check if this entity needs broadcast for mutations (realtime/local_first mode)
+    const needsBroadcastForMutations = this.options.broadcastOnMutations &&
+      entity.syncMode === 'realtime' &&
+      (entity.operations.create || entity.operations.update || entity.operations.delete)
+
     // TanStack Query imports
     const queryImports: string[] = ['useQueryClient']
     if (entity.operations.list || entity.operations.get) {
@@ -141,6 +166,16 @@ export class HookGenerator {
 
     // Query keys import
     imports.push(`import { queryKeys } from './keys.js'`)
+
+    // Broadcast invalidation hook import (when broadcast integration is enabled for queries)
+    if (this.options.broadcastIntegration && (entity.operations.list || entity.operations.get)) {
+      imports.push(`import { useBroadcastInvalidation } from '../runtime/useBroadcastInvalidation.js'`)
+    }
+
+    // Broadcast hook for emitting events on mutations (realtime mode entities)
+    if (needsBroadcastForMutations) {
+      imports.push(`import { useBroadcast } from '../runtime/BroadcastProvider.js'`)
+    }
 
     // Type imports
     const types: Set<string> = new Set()
@@ -161,10 +196,51 @@ export class HookGenerator {
    * Generate list query hook
    */
   private generateListHook(entity: EntityDefinition): string {
-    const { pascalName, name } = entity
+    const { pascalName, name, singular } = entity
     const pluralName = `${pascalName}s`
     const returnType = entity.schemas.listResponse || `${pascalName}[]`
 
+    // Derive broadcast channel from entity singular name
+    const broadcastChannel = singular
+
+    if (this.options.broadcastIntegration) {
+      const jsdoc = this.options.includeJSDoc
+        ? `/**
+ * Fetch all ${name} with broadcast auto-refresh
+ *
+ * @param options.autoRefresh - Enable auto-refresh on broadcast (default: true)
+ *
+ * @example
+ * const { data, isLoading, error } = use${pluralName}()
+ * // Disable auto-refresh while editing
+ * const { data } = use${pluralName}({ autoRefresh: false })
+ */
+`
+        : ''
+
+      return `interface Use${pluralName}Options {
+  /** Enable auto-refresh on broadcast (default: true) */
+  autoRefresh?: boolean
+}
+
+${jsdoc}export function use${pluralName}(options: Use${pluralName}Options = {}): UseQueryResult<${returnType}> {
+  const { autoRefresh = true } = options
+
+  // Subscribe to broadcast for cache invalidation
+  useBroadcastInvalidation({
+    channel: '${broadcastChannel}',
+    queryKeyPrefix: queryKeys.${name}.all,
+    enabled: autoRefresh,
+  })
+
+  return useQuery({
+    queryKey: queryKeys.${name}.all,
+    queryFn: () => ${name}Api.list(),
+  })
+}`
+    }
+
+    // Non-broadcast version (backward compatible)
     const jsdoc = this.options.includeJSDoc
       ? `/**
  * Fetch all ${name}
@@ -190,6 +266,49 @@ export class HookGenerator {
     const { pascalName, name, singular } = entity
     const returnType = entity.schemas.item || pascalName
 
+    // Derive broadcast channel from entity singular name
+    const broadcastChannel = singular
+
+    if (this.options.broadcastIntegration) {
+      const jsdoc = this.options.includeJSDoc
+        ? `/**
+ * Fetch a single ${singular} by ID with broadcast auto-refresh
+ *
+ * @param id - The ${singular} ID
+ * @param options.autoRefresh - Enable auto-refresh on broadcast (default: true)
+ *
+ * @example
+ * const { data, isLoading, error } = use${pascalName}(id)
+ * // Disable auto-refresh while editing
+ * const { data } = use${pascalName}(id, { autoRefresh: false })
+ */
+`
+        : ''
+
+      return `interface Use${pascalName}Options {
+  /** Enable auto-refresh on broadcast (default: true) */
+  autoRefresh?: boolean
+}
+
+${jsdoc}export function use${pascalName}(id: string, options: Use${pascalName}Options = {}): UseQueryResult<${returnType}> {
+  const { autoRefresh = true } = options
+
+  // Subscribe to broadcast for cache invalidation
+  useBroadcastInvalidation({
+    channel: '${broadcastChannel}',
+    queryKeyPrefix: queryKeys.${name}.detail(id),
+    enabled: autoRefresh && !!id,
+  })
+
+  return useQuery({
+    queryKey: queryKeys.${name}.detail(id),
+    queryFn: () => ${name}Api.get(id),
+    enabled: !!id,
+  })
+}`
+    }
+
+    // Non-broadcast version (backward compatible)
     const jsdoc = this.options.includeJSDoc
       ? `/**
  * Fetch a single ${singular} by ID
@@ -217,7 +336,6 @@ export class HookGenerator {
   private generateListWithMetaHook(entity: EntityDefinition): string {
     const { pascalName, name } = entity
     const pluralName = `${pascalName}s`
-    const listType = entity.schemas.listResponse || `${pascalName}[]`
 
     const jsdoc = this.options.includeJSDoc
       ? `/**
@@ -264,10 +382,104 @@ export class HookGenerator {
     const { pascalName, name, singular } = entity
     const requestType = entity.schemas.createRequest || `${pascalName}Create`
     const returnType = entity.schemas.item || pascalName
+    const listType = entity.schemas.listResponse || `${pascalName}[]`
 
+    // Check if this entity needs broadcast on mutations (realtime/local_first mode)
+    const emitBroadcast = this.options.broadcastOnMutations && entity.syncMode === 'realtime'
+
+    if (this.options.optimisticMutations) {
+      const jsdoc = this.options.includeJSDoc
+        ? `/**
+ * Create a new ${singular} with optimistic update
+ *
+ * The UI updates instantly before the API confirms. On error, changes are rolled back.
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
+ *
+ * @example
+ * const { mutate, mutateAsync, isPending } = useCreate${pascalName}()
+ * await mutateAsync(data)
+ */
+`
+        : ''
+
+      // Context type for optimistic mutations
+      const contextType = `{ previousData: ${listType} | undefined }`
+
+      // Build the broadcast setup if needed
+      const broadcastSetup = emitBroadcast
+        ? `  const { emit } = useBroadcast()\n`
+        : ''
+
+      // Build the onSuccess handler with optional broadcast
+      const onSuccessHandler = emitBroadcast
+        ? `
+    // Broadcast create event to other tabs/clients
+    onSuccess: (createdEntity) => {
+      emit('${singular}', {
+        type: 'created',
+        entity_id: (createdEntity as { id: string }).id,
+      })
+    },`
+        : ''
+
+      return `${jsdoc}export function useCreate${pascalName}(): UseMutationResult<${returnType}, Error, ${requestType}, ${contextType}> {
+  const queryClient = useQueryClient()
+${broadcastSetup}
+  return useMutation({
+    mutationFn: (data: ${requestType}) => ${name}Api.create(data),
+
+    // Optimistic update - runs BEFORE API call
+    onMutate: async (newData) => {
+      // Cancel in-flight fetches to prevent race conditions
+      await queryClient.cancelQueries({ queryKey: queryKeys.${name}.all })
+
+      // Snapshot for rollback
+      const previousData = queryClient.getQueryData<${listType}>(queryKeys.${name}.all)
+
+      // Optimistically add to list with temp ID
+      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old) => {
+        if (!old) return old
+        const tempItem = {
+          ...newData,
+          id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+        } as unknown as ${returnType}
+        // Handle both array and paginated response formats
+        if (Array.isArray(old)) {
+          return [...old, tempItem] as ${listType}
+        }
+        if ('items' in old && Array.isArray((old as { items: unknown[] }).items)) {
+          return {
+            ...old,
+            items: [...(old as { items: ${returnType}[] }).items, tempItem],
+          } as ${listType}
+        }
+        return old
+      })
+
+      return { previousData }
+    },
+
+    // Rollback on error
+    onError: (_err, _newData, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.${name}.all, context.previousData)
+      }
+    },
+${onSuccessHandler}
+    // Sync with server response
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+    },
+  })
+}`
+    }
+
+    // Non-optimistic version (backward compatible)
     const jsdoc = this.options.includeJSDoc
       ? `/**
  * Create a new ${singular}
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
  *
  * @example
  * const { mutate, mutateAsync, isPending } = useCreate${pascalName}()
@@ -276,14 +488,31 @@ export class HookGenerator {
 `
       : ''
 
+    // Build the broadcast setup if needed
+    const broadcastSetup = emitBroadcast
+      ? `  const { emit } = useBroadcast()\n`
+      : ''
+
+    // Build the onSuccess handler with optional broadcast
+    const onSuccessContent = emitBroadcast
+      ? `(createdEntity) => {
+      // Broadcast create event to other tabs/clients
+      emit('${singular}', {
+        type: 'created',
+        entity_id: (createdEntity as { id: string }).id,
+      })
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+    }`
+      : `() => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+    }`
+
     return `${jsdoc}export function useCreate${pascalName}(): UseMutationResult<${returnType}, Error, ${requestType}> {
   const queryClient = useQueryClient()
-
+${broadcastSetup}
   return useMutation({
     mutationFn: (data: ${requestType}) => ${name}Api.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
-    },
+    onSuccess: ${onSuccessContent},
   })
 }`
   }
@@ -296,9 +525,92 @@ export class HookGenerator {
     const requestType = entity.schemas.updateRequest || `${pascalName}Update`
     const returnType = entity.schemas.item || pascalName
 
+    // Check if this entity needs broadcast on mutations (realtime/local_first mode)
+    const emitBroadcast = this.options.broadcastOnMutations && entity.syncMode === 'realtime'
+
+    if (this.options.optimisticMutations) {
+      const jsdoc = this.options.includeJSDoc
+        ? `/**
+ * Update an existing ${singular} with optimistic update
+ *
+ * The UI updates instantly before the API confirms. On error, changes are rolled back.
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
+ *
+ * @example
+ * const { mutate, mutateAsync, isPending } = useUpdate${pascalName}()
+ * await mutateAsync({ id, data })
+ */
+`
+        : ''
+
+      // Context type for optimistic mutations
+      const contextType = `{ previousData: ${returnType} | undefined }`
+
+      // Build the broadcast setup if needed
+      const broadcastSetup = emitBroadcast
+        ? `  const { emit } = useBroadcast()\n`
+        : ''
+
+      // Build the onSuccess handler with optional broadcast
+      const onSuccessHandler = emitBroadcast
+        ? `
+    // Broadcast update event to other tabs/clients
+    onSuccess: (_, { id }) => {
+      emit('${singular}', {
+        type: 'updated',
+        entity_id: id,
+      })
+    },`
+        : ''
+
+      return `${jsdoc}export function useUpdate${pascalName}(): UseMutationResult<${returnType}, Error, { id: string; data: ${requestType} }, ${contextType}> {
+  const queryClient = useQueryClient()
+${broadcastSetup}
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ${requestType} }) => ${name}Api.update(id, data),
+
+    // Optimistic update - runs BEFORE API call
+    onMutate: async ({ id, data }) => {
+      // Cancel in-flight fetches to prevent race conditions
+      await queryClient.cancelQueries({ queryKey: queryKeys.${name}.detail(id) })
+
+      // Snapshot for rollback
+      const previousData = queryClient.getQueryData<${returnType}>(queryKeys.${name}.detail(id))
+
+      // Optimistically update the entity
+      queryClient.setQueryData<${returnType}>(queryKeys.${name}.detail(id), (old) => {
+        if (!old) return old
+        return {
+          ...old,
+          ...data,
+          updated_at: new Date().toISOString(),
+        }
+      })
+
+      return { previousData }
+    },
+
+    // Rollback on error
+    onError: (_err, { id }, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.${name}.detail(id), context.previousData)
+      }
+    },
+${onSuccessHandler}
+    // Sync with server response
+    onSettled: (_data, _error, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.detail(id) })
+    },
+  })
+}`
+    }
+
+    // Non-optimistic version (backward compatible)
     const jsdoc = this.options.includeJSDoc
       ? `/**
  * Update an existing ${singular}
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
  *
  * @example
  * const { mutate, mutateAsync, isPending } = useUpdate${pascalName}()
@@ -307,15 +619,33 @@ export class HookGenerator {
 `
       : ''
 
-    return `${jsdoc}export function useUpdate${pascalName}(): UseMutationResult<${returnType}, Error, { id: string; data: ${requestType} }> {
-  const queryClient = useQueryClient()
+    // Build the broadcast setup if needed
+    const broadcastSetup = emitBroadcast
+      ? `  const { emit } = useBroadcast()\n`
+      : ''
 
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: ${requestType} }) => ${name}Api.update(id, data),
-    onSuccess: (_, { id }) => {
+    // Build the onSuccess handler with optional broadcast
+    const onSuccessContent = emitBroadcast
+      ? `(_, { id }) => {
+      // Broadcast update event to other tabs/clients
+      emit('${singular}', {
+        type: 'updated',
+        entity_id: id,
+      })
       queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
       queryClient.invalidateQueries({ queryKey: queryKeys.${name}.detail(id) })
-    },
+    }`
+      : `(_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.detail(id) })
+    }`
+
+    return `${jsdoc}export function useUpdate${pascalName}(): UseMutationResult<${returnType}, Error, { id: string; data: ${requestType} }> {
+  const queryClient = useQueryClient()
+${broadcastSetup}
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ${requestType} }) => ${name}Api.update(id, data),
+    onSuccess: ${onSuccessContent},
   })
 }`
   }
@@ -325,10 +655,105 @@ export class HookGenerator {
    */
   private generateDeleteMutation(entity: EntityDefinition): string {
     const { pascalName, name, singular } = entity
+    const returnType = entity.schemas.item || pascalName
+    const listType = entity.schemas.listResponse || `${pascalName}[]`
 
+    // Check if this entity needs broadcast on mutations (realtime/local_first mode)
+    const emitBroadcast = this.options.broadcastOnMutations && entity.syncMode === 'realtime'
+
+    if (this.options.optimisticMutations) {
+      const jsdoc = this.options.includeJSDoc
+        ? `/**
+ * Delete a ${singular} with optimistic update
+ *
+ * The UI removes the item instantly before the API confirms. On error, it is restored.
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
+ *
+ * @example
+ * const { mutate, mutateAsync, isPending } = useDelete${pascalName}()
+ * await mutateAsync(id)
+ */
+`
+        : ''
+
+      // Context type for optimistic mutations
+      const contextType = `{ previousData: ${listType} | undefined }`
+
+      // Build the broadcast setup if needed
+      const broadcastSetup = emitBroadcast
+        ? `  const { emit } = useBroadcast()\n`
+        : ''
+
+      // Build the onSuccess handler with optional broadcast
+      const onSuccessHandler = emitBroadcast
+        ? `
+    // Broadcast delete event to other tabs/clients
+    onSuccess: (_, id) => {
+      emit('${singular}', {
+        type: 'deleted',
+        entity_id: id,
+      })
+    },`
+        : ''
+
+      return `${jsdoc}export function useDelete${pascalName}(): UseMutationResult<void, Error, string, ${contextType}> {
+  const queryClient = useQueryClient()
+${broadcastSetup}
+  return useMutation({
+    mutationFn: (id: string) => ${name}Api.delete(id),
+
+    // Optimistic update - runs BEFORE API call
+    onMutate: async (id) => {
+      // Cancel in-flight fetches to prevent race conditions
+      await queryClient.cancelQueries({ queryKey: queryKeys.${name}.all })
+
+      // Snapshot for rollback
+      const previousData = queryClient.getQueryData<${listType}>(queryKeys.${name}.all)
+
+      // Optimistically remove from list
+      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old) => {
+        if (!old) return old
+        // Handle both array and paginated response formats
+        if (Array.isArray(old)) {
+          return old.filter((item: ${returnType}) => (item as { id: string }).id !== id) as ${listType}
+        }
+        if ('items' in old && Array.isArray((old as { items: unknown[] }).items)) {
+          return {
+            ...old,
+            items: (old as { items: ${returnType}[] }).items.filter(
+              (item: ${returnType}) => (item as { id: string }).id !== id
+            ),
+          } as ${listType}
+        }
+        return old
+      })
+
+      // Remove individual query
+      queryClient.removeQueries({ queryKey: queryKeys.${name}.detail(id) })
+
+      return { previousData }
+    },
+
+    // Rollback on error
+    onError: (_err, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.${name}.all, context.previousData)
+      }
+    },
+${onSuccessHandler}
+    // Sync with server response
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+    },
+  })
+}`
+    }
+
+    // Non-optimistic version (backward compatible)
     const jsdoc = this.options.includeJSDoc
       ? `/**
  * Delete a ${singular}
+ * ${emitBroadcast ? 'Broadcasts the change to other tabs/clients for real-time sync.' : ''}
  *
  * @example
  * const { mutate, mutateAsync, isPending } = useDelete${pascalName}()
@@ -337,15 +762,33 @@ export class HookGenerator {
 `
       : ''
 
-    return `${jsdoc}export function useDelete${pascalName}(): UseMutationResult<void, Error, string> {
-  const queryClient = useQueryClient()
+    // Build the broadcast setup if needed
+    const broadcastSetup = emitBroadcast
+      ? `  const { emit } = useBroadcast()\n`
+      : ''
 
-  return useMutation({
-    mutationFn: (id: string) => ${name}Api.delete(id),
-    onSuccess: (_, id) => {
+    // Build the onSuccess handler with optional broadcast
+    const onSuccessContent = emitBroadcast
+      ? `(_, id) => {
+      // Broadcast delete event to other tabs/clients
+      emit('${singular}', {
+        type: 'deleted',
+        entity_id: id,
+      })
       queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
       queryClient.removeQueries({ queryKey: queryKeys.${name}.detail(id) })
-    },
+    }`
+      : `(_, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.${name}.all })
+      queryClient.removeQueries({ queryKey: queryKeys.${name}.detail(id) })
+    }`
+
+    return `${jsdoc}export function useDelete${pascalName}(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient()
+${broadcastSetup}
+  return useMutation({
+    mutationFn: (id: string) => ${name}Api.delete(id),
+    onSuccess: ${onSuccessContent},
   })
 }`
   }
