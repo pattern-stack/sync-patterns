@@ -16,6 +16,10 @@
     "./generators": {
       "types": "./dist/generators/index.d.ts",
       "import": "./dist/generators/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
     }
   },
   "files": [
@@ -30,6 +34,8 @@
     "lint:fix": "eslint src --fix",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:integration": "vitest run test/integration",
+    "test:e2e": "./scripts/run-e2e-tests.sh",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -69,14 +75,20 @@
   "devDependencies": {
     "@eslint/js": "^9.15.0",
     "@tanstack/react-query": "^5.90.11",
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.10",
     "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
     "axios": "^1.7.8",
     "eslint": "^9.15.0",
+    "jsdom": "^25.0.1",
+    "react-dom": "^18.2.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.16.0",
     "vitest": "^2.1.6",
+    "ws": "^8.16.0",
     "zod": "^4.1.13"
   },
   "engines": {
