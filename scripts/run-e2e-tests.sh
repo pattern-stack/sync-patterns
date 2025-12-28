@@ -8,6 +8,7 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKSPACE_DIR="$(cd "$PROJECT_DIR/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.test.yml"
 TIMEOUT_SECONDS=60
 TEST_EXIT_CODE=0
@@ -34,7 +35,7 @@ log_error() {
 # Cleanup function - always runs on exit
 cleanup() {
     log_info "Cleaning up test infrastructure..."
-    docker compose -f "$COMPOSE_FILE" down --volumes --remove-orphans 2>/dev/null || true
+    docker compose -f "$COMPOSE_FILE" --project-directory "$WORKSPACE_DIR" down --volumes --remove-orphans 2>/dev/null || true
     log_info "Cleanup complete"
 }
 
@@ -90,15 +91,15 @@ wait_for_health() {
 start_infrastructure() {
     log_info "Starting test infrastructure..."
 
-    # Build and start services
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    # Build and start services (project-directory sets build context to workspace root)
+    docker compose -f "$COMPOSE_FILE" --project-directory "$WORKSPACE_DIR" up -d --build
 
     # Wait for Redis (via docker health check)
     log_info "Waiting for Redis health check..."
     local redis_healthy=false
     local elapsed=0
     while [ $elapsed -lt $TIMEOUT_SECONDS ]; do
-        if docker compose -f "$COMPOSE_FILE" ps redis 2>/dev/null | grep -q "healthy"; then
+        if docker compose -f "$COMPOSE_FILE" --project-directory "$WORKSPACE_DIR" ps redis 2>/dev/null | grep -q "healthy"; then
             redis_healthy=true
             break
         fi
@@ -110,7 +111,7 @@ start_infrastructure() {
 
     if [ "$redis_healthy" = false ]; then
         log_error "Redis did not become healthy"
-        docker compose -f "$COMPOSE_FILE" logs redis
+        docker compose -f "$COMPOSE_FILE" --project-directory "$WORKSPACE_DIR" logs redis
         return 1
     fi
     log_info "Redis is healthy"
@@ -118,7 +119,7 @@ start_infrastructure() {
     # Wait for backend
     if ! wait_for_health "test-backend" "http://localhost:8000/health"; then
         log_error "Backend logs:"
-        docker compose -f "$COMPOSE_FILE" logs test-backend
+        docker compose -f "$COMPOSE_FILE" --project-directory "$WORKSPACE_DIR" logs test-backend
         return 1
     fi
 
@@ -133,7 +134,7 @@ run_tests() {
 
     # Run vitest with the E2E test pattern
     # The tests should be configured to connect to localhost:8000
-    if npm run test:run -- --reporter=verbose src/__tests__/integration/; then
+    if npm run test:run -- --reporter=verbose test/integration/; then
         log_info "All tests passed!"
         TEST_EXIT_CODE=0
     else

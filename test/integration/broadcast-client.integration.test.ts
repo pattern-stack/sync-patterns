@@ -107,14 +107,57 @@ describe('BroadcastClient Integration', () => {
       // Wait briefly for subscription to be registered
       await wait(100)
 
-      // Note: To fully test receiving messages, the server would need to send
-      // a message on the 'test' channel. This test verifies subscription works
-      // without errors. A full E2E test would require server cooperation.
-
       unsubscribe()
 
       // Verify subscription/unsubscription didn't throw
       expect(true).toBe(true)
+    })
+
+    it('receives server-triggered broadcast via /test/broadcast endpoint', async () => {
+      if (!serverAvailable) {
+        console.log('Skipping: server not available')
+        return
+      }
+
+      client.connect()
+      await waitForState(client, 'connected', 5000)
+
+      const receivedEvents: BroadcastEvent[] = []
+
+      // Subscribe to orders channel
+      client.subscribe('orders', (event) => {
+        receivedEvents.push(event)
+      })
+
+      // Wait for subscription to be registered on server
+      await wait(200)
+
+      // Trigger a broadcast from the server via the test endpoint
+      const broadcastUrl = getBroadcastUrl()
+        .replace(/^ws/, 'http')
+        .replace(/\/ws\/broadcast$/, '/test/broadcast')
+
+      const response = await fetch(broadcastUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'orders',
+          event_type: 'order.created',
+          payload: { order_id: 'test-order-123', total: 99.99 },
+        }),
+      })
+
+      expect(response.ok).toBe(true)
+
+      // Wait for the broadcast message to arrive
+      await wait(300)
+
+      // Verify client received the server-triggered broadcast
+      expect(receivedEvents.length).toBe(1)
+      expect(receivedEvents[0].channel).toBe('orders')
+      expect(receivedEvents[0].event).toBe('order.created')
+      expect(receivedEvents[0].payload.order_id).toBe('test-order-123')
+      expect(receivedEvents[0].payload.total).toBe(99.99)
     })
 
     it('resubscribes to channels after reconnect', async () => {

@@ -169,12 +169,12 @@ export class HookGenerator {
 
     // Broadcast invalidation hook import (when broadcast integration is enabled for queries)
     if (this.options.broadcastIntegration && (entity.operations.list || entity.operations.get)) {
-      imports.push(`import { useBroadcastInvalidation } from '../runtime/useBroadcastInvalidation.js'`)
+      imports.push(`import { useBroadcastInvalidation } from '@pattern-stack/sync-patterns/runtime'`)
     }
 
     // Broadcast hook for emitting events on mutations (realtime mode entities)
     if (needsBroadcastForMutations) {
-      imports.push(`import { useBroadcast } from '../runtime/BroadcastProvider.js'`)
+      imports.push(`import { useBroadcast } from '@pattern-stack/sync-patterns/runtime'`)
     }
 
     // Type imports
