@@ -8,6 +8,8 @@ dist/
 # Test output
 test/output/
 test/real-output/
+test-output/
+test-output-minimal/
 coverage/
 
 # IDE

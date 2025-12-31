@@ -1,9 +1,11 @@
-# SYNC-009: Unified Query with Metadata (DRAFT)
+# SYNC-013: Unified Query with Metadata (DRAFT)
 
 > **Status**: DRAFT
+> **Spec ID**: SYNC-013
 > **Created**: 2025-12-09
-> **Updated**: 2025-12-09
+> **Updated**: 2025-12-26
 > **Author**: Claude + Dug
+> **Note**: Renumbered from SYNC-009 to avoid conflict with superseded Electric spec
 
 ## Problem Statement
 

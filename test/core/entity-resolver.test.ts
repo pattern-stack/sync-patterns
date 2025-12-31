@@ -274,6 +274,97 @@ describe('EntityResolver', () => {
     })
   })
 
+  describe('entity reference resolution (x-ui-reference)', () => {
+    it('extracts x-ui-reference from FK fields with entity type', () => {
+      const spec = loadFixture('with-entity-references.json')
+      const model = resolver.resolve(spec)
+      const transactions = model.entities.get('transactions')!
+
+      // Find the category_id column
+      const categoryIdCol = transactions.columnMetadata?.find(
+        (c) => c.field === 'category_id'
+      )
+      expect(categoryIdCol).toBeDefined()
+      expect(categoryIdCol!.type).toBe('entity')
+      expect(categoryIdCol!.reference).toBeDefined()
+      expect(categoryIdCol!.reference!.entity).toBe('categories')
+      expect(categoryIdCol!.reference!.displayField).toBe('name')
+    })
+
+    it('extracts x-ui-reference with custom displayField', () => {
+      const spec = loadFixture('with-entity-references.json')
+      const model = resolver.resolve(spec)
+      const transactions = model.entities.get('transactions')!
+
+      // Find the account_id column which has displayField: 'title'
+      const accountIdCol = transactions.columnMetadata?.find(
+        (c) => c.field === 'account_id'
+      )
+      expect(accountIdCol).toBeDefined()
+      expect(accountIdCol!.type).toBe('entity')
+      expect(accountIdCol!.reference).toBeDefined()
+      expect(accountIdCol!.reference!.entity).toBe('accounts')
+      expect(accountIdCol!.reference!.displayField).toBe('title')
+    })
+
+    it('defaults displayField to "name" when not specified', () => {
+      const spec = loadFixture('with-entity-references.json')
+      const model = resolver.resolve(spec)
+      const transactions = model.entities.get('transactions')!
+
+      // Find the created_by column which has no displayField specified
+      const createdByCol = transactions.columnMetadata?.find(
+        (c) => c.field === 'created_by'
+      )
+      expect(createdByCol).toBeDefined()
+      expect(createdByCol!.type).toBe('user')
+      expect(createdByCol!.reference).toBeDefined()
+      expect(createdByCol!.reference!.entity).toBe('users')
+      expect(createdByCol!.reference!.displayField).toBe('name') // Default
+    })
+
+    it('handles self-referencing entity (parent_id)', () => {
+      const spec = loadFixture('with-entity-references.json')
+      const model = resolver.resolve(spec)
+      const categories = model.entities.get('categories')!
+
+      // Find the parent_id column which references the same entity
+      const parentIdCol = categories.columnMetadata?.find(
+        (c) => c.field === 'parent_id'
+      )
+      expect(parentIdCol).toBeDefined()
+      expect(parentIdCol!.type).toBe('entity')
+      expect(parentIdCol!.reference).toBeDefined()
+      expect(parentIdCol!.reference!.entity).toBe('categories')
+      expect(parentIdCol!.reference!.displayField).toBe('name')
+    })
+
+    it('does not add reference for non-entity type fields', () => {
+      const spec = loadFixture('with-entity-references.json')
+      const model = resolver.resolve(spec)
+      const transactions = model.entities.get('transactions')!
+
+      // Find the amount column (money type, no reference)
+      const amountCol = transactions.columnMetadata?.find(
+        (c) => c.field === 'amount'
+      )
+      expect(amountCol).toBeDefined()
+      expect(amountCol!.type).toBe('money')
+      expect(amountCol!.reference).toBeUndefined()
+    })
+
+    it('does not add reference when x-ui-reference is not present', () => {
+      const spec = loadFixture('minimal-crud.json')
+      const model = resolver.resolve(spec)
+      const accounts = model.entities.get('accounts')!
+
+      // All columns should have no reference
+      for (const col of accounts.columnMetadata || []) {
+        expect(col.reference).toBeUndefined()
+      }
+    })
+  })
+
   describe('authentication detection', () => {
     describe('operation-level security', () => {
       it('detects operation with explicit security requirement', () => {

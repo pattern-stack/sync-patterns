@@ -30,10 +30,21 @@ program
   .option('--no-client', 'Skip API client generation')
   .option('--hooks [boolean]', 'Generate React Query hooks', true)
   .option('--no-hooks', 'Skip React Query hook generation')
+  .option('--store [boolean]', 'Generate EntityStore (typed cache facade)', true)
+  .option('--no-store', 'Skip EntityStore generation')
   .option('--collections [boolean]', 'Generate TanStack DB collections (for local_first: true)', true)
   .option('--no-collections', 'Skip TanStack DB collection generation')
   .option('--entities [boolean]', 'Generate unified entity wrappers (THE public API)', true)
   .option('--no-entities', 'Skip entity wrapper generation')
+  // UI Metadata generators (Pattern Stack 2.0)
+  .option('--columns [boolean]', 'Generate column metadata from schemas', true)
+  .option('--no-columns', 'Skip column metadata generation')
+  .option('--renderers [boolean]', 'Generate field renderers (UIType → React)', true)
+  .option('--no-renderers', 'Skip field renderer generation')
+  .option('--entity-configs [boolean]', 'Generate entity UI configs', true)
+  .option('--no-entity-configs', 'Skip entity config generation')
+  .option('--column-hooks [boolean]', 'Generate column metadata hooks', true)
+  .option('--no-column-hooks', 'Skip column hook generation')
   .option(
     '--api-url <url>',
     'Default API base URL for generated client',
@@ -81,6 +92,11 @@ program
     'Backend API URL (or set SYNC_PATTERNS_API_URL)',
     process.env.SYNC_PATTERNS_API_URL
   )
+  .option(
+    '--api-prefix <prefix>',
+    'API path prefix (e.g., /api/v1) - appended to api-url',
+    process.env.SYNC_PATTERNS_API_PREFIX || ''
+  )
   .option('--mode <mode>', 'Force sync mode (optimistic|confirmed)')
   .option('--no-cache', 'Disable caching')
   .option('--generate', 'Regenerate code before exploring')
@@ -101,6 +117,11 @@ program
     '--api-url <url>',
     'Backend API URL (or set SYNC_PATTERNS_API_URL)',
     process.env.SYNC_PATTERNS_API_URL
+  )
+  .option(
+    '--api-prefix <prefix>',
+    'API path prefix (e.g., /api/v1) - appended to api-url',
+    process.env.SYNC_PATTERNS_API_PREFIX || ''
   )
   .option('--email <email>', 'Email address (will prompt if not provided)')
   .option('--logout', 'Clear saved token for this API URL')

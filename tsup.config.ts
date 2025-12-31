@@ -7,6 +7,7 @@ export default defineConfig([
       index: 'src/index.ts',
       'generators/index': 'src/generators/index.ts',
       'tui/index': 'src/tui/index.ts',
+      'runtime/index': 'src/runtime/index.ts',
     },
     format: ['esm'],
     dts: true,
@@ -17,6 +18,7 @@ export default defineConfig([
     minify: false,
     target: 'node18',
     outDir: 'dist',
+    external: ['react', '@tanstack/react-query'],
   },
   // CLI (with shebang)
   {

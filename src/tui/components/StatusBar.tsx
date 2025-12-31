@@ -6,6 +6,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
+import { useTheme } from './ThemeProvider.js'
 
 export interface StatusBarProps {
   /** Current view type */
@@ -27,7 +28,7 @@ function getShortcutsForView(view: 'entity-list' | 'table' | 'detail'): string {
       return '↑/↓: Navigate  •  Enter: Select  •  ?: Help  •  q: Quit'
 
     case 'table':
-      return '↑/↓: Navigate  •  PgUp/PgDn: Page  •  Enter: Detail  •  Esc: Back  •  ?: Help  •  q: Quit'
+      return '↑/↓: Navigate  •  PgUp/PgDn: Page  •  Enter: Detail  •  /: Search  •  Esc: Back  •  q: Quit'
 
     case 'detail':
       return '↑/↓: Scroll  •  Esc: Back to Table  •  ?: Help  •  q: Quit'
@@ -46,6 +47,7 @@ export default function StatusBar({
   totalPages,
   isLoading = false,
 }: StatusBarProps) {
+  const theme = useTheme()
   const shortcuts = getShortcutsForView(view)
 
   // Show loading indicator if data is being fetched
@@ -53,8 +55,8 @@ export default function StatusBar({
     return (
       <Box borderStyle="single" borderColor="gray" paddingX={1}>
         <Box justifyContent="space-between" width="100%">
-          <Text dimColor>Loading...</Text>
-          <Text dimColor>{shortcuts}</Text>
+          <Text>{theme.muted('Loading...')}</Text>
+          <Text>{theme.mutedForeground(shortcuts)}</Text>
         </Box>
       </Box>
     )
@@ -65,10 +67,8 @@ export default function StatusBar({
     return (
       <Box borderStyle="single" borderColor="gray" paddingX={1}>
         <Box justifyContent="space-between" width="100%">
-          <Text dimColor>
-            Page {currentPage} of {totalPages}
-          </Text>
-          <Text dimColor>{shortcuts}</Text>
+          <Text>{theme.muted(`Page ${currentPage} of ${totalPages}`)}</Text>
+          <Text>{theme.mutedForeground(shortcuts)}</Text>
         </Box>
       </Box>
     )
@@ -77,7 +77,7 @@ export default function StatusBar({
   // Default: just show shortcuts
   return (
     <Box borderStyle="single" borderColor="gray" paddingX={1}>
-      <Text dimColor>{shortcuts}</Text>
+      <Text>{theme.mutedForeground(shortcuts)}</Text>
     </Box>
   )
 }

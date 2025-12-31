@@ -72,11 +72,28 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 /**
+ * Build query string from params
+ */
+function buildQueryString(params?: Record<string, string | number | boolean>): string {
+  if (!params || Object.keys(params).length === 0) {
+    return ''
+  }
+
+  const query = Object.entries(params)
+    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&')
+
+  return query ? `?${query}` : ''
+}
+
+/**
  * API client with HTTP methods
  */
 export const apiClient = {
-  async get<T>(path: string): Promise<T> {
-    const response = await fetch(`${config.baseUrl}${path}`, {
+  async get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
+    const queryString = buildQueryString(params)
+    const response = await fetch(`${config.baseUrl}${path}${queryString}`, {
       method: 'GET',
       headers: buildHeaders(),
     })

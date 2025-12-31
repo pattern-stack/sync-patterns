@@ -1,9 +1,12 @@
 # SYNC-008: Event-Sourced Sync Architecture
 
-> **Status**: Draft
+> **Status**: Superseded
 > **Author**: Claude + Dug
 > **Date**: 2025-12-06
 > **Supersedes**: SYNC-007 (Unified Offline Architecture)
+> **Superseded By**: [SYNC-012: Broadcast + Optimistic Sync](./SYNC-012-broadcast-optimistic-sync.md)
+>
+> **Note**: This spec proposed a full event-sourcing architecture with Dexie, custom materializers, and a sync engine. This was deemed too complex for current requirements. SYNC-012 provides a simpler approach using TanStack Query optimistic mutations + Broadcast.
 
 ## Executive Summary
 

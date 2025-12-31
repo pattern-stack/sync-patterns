@@ -29,22 +29,6 @@ export {
   type ZodGeneratorOptions,
 } from './zod-generator.js'
 
-// API Client Generator
-export {
-  APIClientGenerator,
-  generateAPIClient,
-  type GeneratedClient,
-  type ClientGeneratorOptions,
-} from './client-generator.js'
-
-// React Hook Generator
-export {
-  ReactHookGenerator,
-  generateHooks,
-  type GeneratedHooks,
-  type HookGeneratorOptions,
-} from './hook-generator.js'
-
 // Naming utilities
 export {
   cleanOperationId,
@@ -62,62 +46,34 @@ export {
   singularize,
 } from './naming.js'
 
-// Bulk operation types and utilities
+// Column Metadata Generator (UI metadata from schemas)
 export {
-  BulkHookGenerator,
-} from './bulk-hook-generator.js'
+  ColumnMetadataGenerator,
+  generateColumnMetadata,
+  type GeneratedColumnMetadata,
+  type ColumnMetadataGeneratorOptions,
+} from './column-metadata-generator.js'
 
+// Field Renderer Generator (UIType → React component mapping)
 export {
-  isBulkOperation,
-  detectBulkOperationType,
-  generateBulkOperationName,
-  type BulkOperationRequest,
-  type BulkOperationOptions,
-  type BulkOperationProgress,
-  type BulkOperationResponse,
-  type BulkOperationResult,
-  type BulkOperationError,
-  type BulkOperationSummary,
-  type BulkRetryConfig,
-  type BulkMutationOptions,
-} from './bulk-types.js'
+  FieldRendererGenerator,
+  generateFieldRenderers,
+  type GeneratedFieldRenderers,
+  type FieldRendererGeneratorOptions,
+} from './field-renderer-generator.js'
 
-// TanStack DB Collection Generator
+// Entity Config Generator (semantic field mapping)
 export {
-  CollectionGenerator,
-  generateCollections,
-  type GeneratedCollections,
-  type CollectionGeneratorOptions,
-} from './collection-generator.js'
+  EntityConfigGenerator,
+  generateEntityConfigs,
+  type GeneratedEntityConfigs,
+  type EntityConfigGeneratorOptions,
+} from './entity-config-generator.js'
 
-// Config Generator
+// Column Hook Generator (runtime column metadata fetching)
 export {
-  ConfigGenerator,
-  generateConfig,
-  type GeneratedConfig,
-  type ConfigGeneratorOptions,
-} from './config-generator.js'
-
-// Entity Wrapper Generator
-export {
-  EntityGenerator,
-  generateEntityWrappers,
-  type GeneratedEntityWrappers,
-  type EntityGeneratorOptions,
-} from './entity-generator.js'
-
-// Sync Provider Generator (for offline mode)
-export {
-  SyncProviderGenerator,
-  generateSyncProvider,
-  type GeneratedSyncProvider,
-  type SyncProviderGeneratorOptions,
-} from './sync-provider-generator.js'
-
-// Entities Hook Generator (aggregator for useEntities)
-export {
-  EntitiesHookGenerator,
-  generateEntitiesHook,
-  type GeneratedEntitiesHook,
-  type EntitiesHookGeneratorOptions,
-} from './entities-hook-generator.js'
+  ColumnHookGenerator,
+  generateColumnHooks,
+  type GeneratedColumnHooks,
+  type ColumnHookGeneratorOptions,
+} from './column-hook-generator.js'

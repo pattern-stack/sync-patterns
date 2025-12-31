@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
-import chalk from 'chalk'
+import { useTheme } from './ThemeProvider.js'
 
 export interface LoadingViewProps {
   /** Loading message to display */
@@ -27,6 +27,7 @@ export default function LoadingView({
   message = 'Loading',
   entityName,
 }: LoadingViewProps) {
+  const theme = useTheme()
   const [frame, setFrame] = useState(0)
 
   // Animate spinner
@@ -43,11 +44,11 @@ export default function LoadingView({
   return (
     <Box flexDirection="column" padding={2}>
       <Box>
-        <Text color="cyan">{spinnerChar} {message}</Text>
+        <Text>{theme.info(`${spinnerChar} ${message}`)}</Text>
         {entityName && (
-          <Text color="cyan"> {entityName}</Text>
+          <Text> {theme.info(entityName)}</Text>
         )}
-        <Text color="cyan">...</Text>
+        <Text>{theme.info('...')}</Text>
       </Box>
     </Box>
   )

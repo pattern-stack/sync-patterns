@@ -16,8 +16,14 @@ import {
   type SchemaReference,
   type SyncMode,
   type HttpMethod,
+  type ColumnMetadata,
+  type PropertyDefinition,
+  type UIType,
+  type UIImportance,
   createEmptyEntityModel,
   createEmptyEntityDefinition,
+  propertyToColumnMetadata,
+  deriveEntityUIConfig,
 } from './entity-model.js'
 
 /**
@@ -66,7 +72,83 @@ export class EntityResolver {
     // Extract shared schemas (non-entity schemas)
     // TODO: Implement shared schema extraction
 
+    // Extract UI metadata for each entity from their schemas
+    for (const [entityName, entity] of model.entities) {
+      this.populateUIMetadata(entity, spec)
+    }
+
     return model
+  }
+
+  /**
+   * Populate UI metadata for an entity from its OpenAPI schema
+   */
+  private populateUIMetadata(
+    entity: EntityDefinition,
+    spec: OpenAPIV3.Document
+  ): void {
+    // Find the entity's item schema (e.g., "Account" for "accounts")
+    const schemaName = entity.schemas.item
+    if (!schemaName) return
+
+    const schema = spec.components?.schemas?.[schemaName] as OpenAPIV3.SchemaObject | undefined
+    if (!schema || schema.type !== 'object' || !schema.properties) return
+
+    // Extract column metadata from schema properties
+    const columns: ColumnMetadata[] = []
+    const required = new Set(schema.required || [])
+
+    for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
+      const resolved = this.resolveRef(fieldSchema, spec) as OpenAPIV3.SchemaObject
+      const propDef = this.extractPropertyDefinition(fieldName, resolved)
+      const colMeta = propertyToColumnMetadata(propDef, required.has(fieldName))
+      columns.push(colMeta)
+    }
+
+    // Store column metadata
+    entity.columnMetadata = columns
+
+    // Derive UI config from columns
+    entity.uiConfig = deriveEntityUIConfig(columns, entity.name)
+  }
+
+  /**
+   * Extract PropertyDefinition with UI metadata from OpenAPI schema property
+   */
+  private extractPropertyDefinition(
+    fieldName: string,
+    schema: OpenAPIV3.SchemaObject
+  ): PropertyDefinition {
+    // Cast to access x-ui-* extensions
+    const ext = schema as Record<string, unknown>
+
+    // Parse x-ui-reference for entity type fields
+    const rawReference = ext['x-ui-reference'] as
+      | { entity: string; displayField?: string }
+      | undefined
+
+    return {
+      name: fieldName,
+      type: schema.type as string || 'string',
+      format: schema.format,
+      nullable: schema.nullable,
+      description: schema.description,
+      ref: '$ref' in schema ? (schema as { $ref: string }).$ref : undefined,
+
+      // Extract x-ui-* extensions
+      uiType: ext['x-ui-type'] as UIType | undefined,
+      uiImportance: ext['x-ui-importance'] as UIImportance | undefined,
+      uiGroup: ext['x-ui-group'] as string | undefined,
+      uiLabel: ext['x-ui-label'] as string | undefined,
+      uiFormat: ext['x-ui-format'] as Record<string, unknown> | undefined,
+      uiSortable: ext['x-ui-sortable'] as boolean | undefined,
+      uiFilterable: ext['x-ui-filterable'] as boolean | undefined,
+      uiVisible: ext['x-ui-visible'] as boolean | undefined,
+      uiHelp: ext['x-ui-help'] as string | undefined,
+      uiPlaceholder: ext['x-ui-placeholder'] as string | undefined,
+      uiOptions: (schema.enum as string[]) ?? (ext['x-ui-options'] as string[] | undefined),
+      uiReference: rawReference,
+    }
   }
 
   /**

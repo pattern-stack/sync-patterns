@@ -1,12 +1,16 @@
 # SPEC: Electric + Broadcast Sync Architecture
 
+> **SUPERSEDED**: This spec has been superseded by [SYNC-012: Broadcast + Optimistic Sync](./SYNC-012-broadcast-optimistic-sync.md).
+>
+> **Reason**: Electric adds complexity without a current offline requirement. SYNC-012 uses TanStack Query optimistic mutations + Broadcast for a simpler architecture that delivers the same UI snappiness.
+
 ## Metadata
 
 | Field | Value |
 |-------|-------|
 | **Spec ID** | SYNC-009 |
 | **Title** | Electric + Broadcast Sync Architecture |
-| **Status** | Draft |
+| **Status** | Superseded |
 | **Created** | 2025-12-26 |
 | **Supersedes** | SYNC-008 (Event-Sourced Sync Architecture) |
 | **Depends On** | [ADR-001](../adr/001-sync-stack-selection.md), [SYNC-002](SYNC-002-client-architecture.md) |

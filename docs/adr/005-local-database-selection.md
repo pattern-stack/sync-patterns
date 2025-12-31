@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted**
+**Deferred** (2025-12-26)
+
+> **Note**: Local database selection is deferred along with Electric integration. Current architecture uses TanStack Query in-memory cache only. When offline support becomes a requirement, this ADR's decision (PGlite) remains the intended direction. See [SYNC-012](../specs/SYNC-012-broadcast-optimistic-sync.md).
 
 ## Date
 

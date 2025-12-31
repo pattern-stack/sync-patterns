@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import chalk from 'chalk'
+import { useTheme } from './ThemeProvider.js'
 
 export interface ErrorViewProps {
   /** Error object or message */
@@ -41,14 +41,25 @@ function parseError(error: Error | string): {
     }
   }
 
-  // HTTP error with status code
-  const statusMatch = errorMessage.match(/status code (\d+)/)
+  // HTTP error with status code (matches "API Error 401:" or "status code 401")
+  const statusMatch = errorMessage.match(/(?:API Error|status code)\s*(\d+)/i)
   if (statusMatch) {
+    const statusCode = parseInt(statusMatch[1], 10)
+    const statusMessages: Record<number, string> = {
+      400: 'Bad request - check your input',
+      401: 'Authentication required',
+      403: 'Access denied - check your permissions',
+      404: 'Resource not found',
+      422: 'Validation error',
+      500: 'Internal server error',
+      502: 'Bad gateway',
+      503: 'Service unavailable',
+    }
     return {
       type: 'network',
-      message: `Server returned error ${statusMatch[1]}`,
+      message: statusMessages[statusCode] || `Server returned error ${statusCode}`,
       details: errorMessage,
-      statusCode: parseInt(statusMatch[1], 10),
+      statusCode,
     }
   }
 
@@ -105,6 +116,7 @@ export default function ErrorView({
   showRetry = true,
   entityName,
 }: ErrorViewProps) {
+  const theme = useTheme()
   const parsed = parseError(error)
   const icon = getErrorIcon(parsed.type)
 
@@ -112,17 +124,15 @@ export default function ErrorView({
     <Box flexDirection="column" padding={2}>
       {/* Error header */}
       <Box marginBottom={1}>
-        <Text color="red" bold>
-          {icon} Error {context}
-        </Text>
+        <Text bold>{theme.error(`${icon} Error ${context}`)}</Text>
         {entityName && (
-          <Text color="red"> ({entityName})</Text>
+          <Text> {theme.error(`(${entityName})`)}</Text>
         )}
       </Box>
 
       {/* Main error message */}
       <Box marginBottom={1} paddingLeft={2}>
-        <Text color="red">{parsed.message}</Text>
+        <Text>{theme.error(parsed.message)}</Text>
       </Box>
 
       {/* Error details */}
@@ -135,40 +145,40 @@ export default function ErrorView({
           borderColor="red"
           padding={1}
         >
-          <Text dimColor>Details:</Text>
-          <Text dimColor wrap="wrap">{parsed.details}</Text>
+          <Text>{theme.muted('Details:')}</Text>
+          <Text wrap="wrap">{theme.mutedForeground(parsed.details)}</Text>
         </Box>
       )}
 
       {/* HTTP status code specific help */}
       {parsed.statusCode && (
         <Box marginBottom={1} paddingLeft={2}>
-          <Text dimColor>
-            {parsed.statusCode === 404 && 'The requested resource was not found.'}
-            {parsed.statusCode === 401 && 'Authentication required or invalid credentials.'}
-            {parsed.statusCode === 403 && 'Access denied. Check your permissions.'}
-            {parsed.statusCode === 500 && 'Server error. Please try again later.'}
-            {parsed.statusCode >= 500 && parsed.statusCode < 600 && 'Server is experiencing issues.'}
-          </Text>
+          <Text>{theme.mutedForeground(
+            parsed.statusCode === 404 ? 'The requested resource was not found.' :
+            parsed.statusCode === 401 ? 'Authentication required or invalid credentials.' :
+            parsed.statusCode === 403 ? 'Access denied. Check your permissions.' :
+            parsed.statusCode === 500 ? 'Server error. Please try again later.' :
+            parsed.statusCode >= 500 && parsed.statusCode < 600 ? 'Server is experiencing issues.' : ''
+          )}</Text>
         </Box>
       )}
 
       {/* Import error specific help */}
       {parsed.type === 'import' && (
         <Box marginBottom={1} paddingLeft={2}>
-          <Text dimColor>
-            Run {chalk.cyan('sync-patterns generate <openapi-spec>')} to generate the required files.
+          <Text>
+            {theme.mutedForeground('Run ')}{theme.info('sync-patterns generate <openapi-spec>')}{theme.mutedForeground(' to generate the required files.')}
           </Text>
         </Box>
       )}
 
       {/* Actions */}
       <Box marginTop={1}>
-        <Text dimColor>
-          {showRetry && 'Press '}
-          {showRetry && <Text color="cyan">r</Text>}
-          {showRetry && ' to retry  •  '}
-          Press <Text color="cyan">Esc</Text> to go back  •  Press <Text color="cyan">q</Text> to quit
+        <Text>
+          {showRetry && theme.mutedForeground('Press ')}
+          {showRetry && theme.primary('r')}
+          {showRetry && theme.mutedForeground(' to retry  •  ')}
+          {theme.mutedForeground('Press ')}{theme.primary('Esc')}{theme.mutedForeground(' to go back  •  Press ')}{theme.primary('q')}{theme.mutedForeground(' to quit')}
         </Text>
       </Box>
     </Box>

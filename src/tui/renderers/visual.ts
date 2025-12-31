@@ -6,27 +6,12 @@
 
 import chalk from 'chalk';
 import { getSymbol, terminalCapabilities } from '../utils/terminal.js';
+import { themedChalk } from '../utils/theme.js';
 
 /**
  * Status color type
  */
 export type StatusColor = 'success' | 'warning' | 'error' | 'info' | 'neutral';
-
-/**
- * Internal color mapping for chalk
- */
-type ChalkColor = 'green' | 'yellow' | 'red' | 'cyan' | 'gray';
-
-/**
- * Status to chalk color mapping
- */
-const STATUS_TO_CHALK: Record<StatusColor, ChalkColor> = {
-  success: 'green',
-  warning: 'yellow',
-  error: 'red',
-  info: 'cyan',
-  neutral: 'gray',
-};
 
 /**
  * Default status color mapping
@@ -43,21 +28,6 @@ const STATUS_COLORS: Record<string, StatusColor> = {
   info: 'info',
   neutral: 'neutral',
 };
-
-/**
- * Get chalk color function for status
- */
-function getStatusChalk(status: StatusColor) {
-  const chalkColor = STATUS_TO_CHALK[status];
-  switch (chalkColor) {
-    case 'green': return chalk.green;
-    case 'yellow': return chalk.yellow;
-    case 'red': return chalk.red;
-    case 'cyan': return chalk.cyan;
-    case 'gray': return chalk.gray;
-    default: return chalk.white;
-  }
-}
 
 /**
  * Render badge with colored text
@@ -97,7 +67,13 @@ export function renderStatus(
     return `${indicator} ${value}`;
   }
 
-  const colorFn = getStatusChalk(color);
+  // Use theme colors for status
+  const colorFn = color === 'success' ? themedChalk.success.bind(themedChalk) :
+                  color === 'warning' ? themedChalk.warning.bind(themedChalk) :
+                  color === 'error' ? themedChalk.error.bind(themedChalk) :
+                  color === 'info' ? themedChalk.info.bind(themedChalk) :
+                  themedChalk.muted.bind(themedChalk);
+
   return `${colorFn(indicator)} ${colorFn(String(value))}`;
 }
 
@@ -114,7 +90,7 @@ export function renderBoolean(value: unknown): string {
     return symbol;
   }
 
-  return isTrue ? chalk.green(symbol) : chalk.red(symbol);
+  return isTrue ? themedChalk.success(symbol) : themedChalk.error(symbol);
 }
 
 /**
@@ -134,7 +110,7 @@ export function renderRating(
   const stars = filledStar.repeat(Math.min(filled, max)) +
                 emptyStar.repeat(Math.max(0, max - filled));
 
-  return terminalCapabilities.color ? chalk.yellow(stars) : stars;
+  return terminalCapabilities.color ? themedChalk.accent(stars) : stars;
 }
 
 /**

@@ -12,11 +12,11 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
-import chalk from 'chalk'
 import { renderField, type UIType, type FieldFormat } from '../renderers/index.js'
 import { calculateColumnWidths, inferUIType, truncateUUID } from '../utils/column-sizing.js'
-import LoadingView from './LoadingView'
-import ErrorView from './ErrorView'
+import LoadingView from './LoadingView.js'
+import ErrorView from './ErrorView.js'
+import { useTheme } from './ThemeProvider.js'
 
 /**
  * Column definition
@@ -60,6 +60,8 @@ export interface DataTableProps {
   totalCount?: number
   /** Current entity name (for header) */
   entityName?: string
+  /** Callback when search is activated (/ key pressed) */
+  onSearchActivate?: () => void
 }
 
 /**
@@ -76,7 +78,9 @@ export default function DataTable({
   searchQuery = '',
   totalCount,
   entityName = 'Records',
+  onSearchActivate,
 }: DataTableProps) {
+  const theme = useTheme()
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedRow, setSelectedRow] = useState(0)
 
@@ -186,11 +190,9 @@ export default function DataTable({
       onBack()
     }
 
-    // / - search (placeholder for now)
-    if (input === '/' && !key.meta && !key.ctrl) {
-      // TODO: Implement search mode in Issue 6
-      // For now, just log
-      console.log('Search mode coming soon...')
+    // / - activate search mode
+    if (input === '/' && !key.meta && !key.ctrl && onSearchActivate) {
+      onSearchActivate()
     }
   })
 
@@ -208,9 +210,9 @@ export default function DataTable({
   if (data.length === 0) {
     return (
       <Box flexDirection="column" padding={2}>
-        <Text dimColor>No {entityName.toLowerCase()} found</Text>
+        <Text>{theme.muted(`No ${entityName.toLowerCase()} found`)}</Text>
         <Box marginTop={1}>
-          <Text dimColor>Press Esc to go back</Text>
+          <Text>{theme.mutedForeground('Press Esc to go back')}</Text>
         </Box>
       </Box>
     )
@@ -221,14 +223,14 @@ export default function DataTable({
       {/* Header */}
       <Box borderStyle="single" borderColor="cyan" paddingX={1} marginBottom={1}>
         <Text>
-          <Text bold color="cyan">{entityName}</Text>
-          <Text dimColor> ({totalCount || data.length} total</Text>
+          <Text bold>{theme.primary(entityName)}</Text>
+          <Text> {theme.muted(`(${totalCount || data.length} total`)}</Text>
           {searchQuery && (
-            <Text dimColor>, {data.length} matches</Text>
+            <Text>{theme.muted(`, ${data.length} matches`)}</Text>
           )}
-          <Text dimColor>)</Text>
+          <Text>{theme.muted(')')}</Text>
           {searchQuery && (
-            <Text> [search: <Text color="yellow">{searchQuery}</Text>]</Text>
+            <Text> {theme.muted('[search:')} {theme.accent(searchQuery)}{theme.muted(']')}</Text>
           )}
         </Text>
       </Box>
@@ -239,7 +241,7 @@ export default function DataTable({
         <Box>
           {visibleColumns.map((col, idx) => (
             <Box key={col.key} width={columnWidths[idx]} paddingX={1}>
-              <Text bold>{truncate(col.label, columnWidths[idx] - 2)}</Text>
+              <Text bold>{theme.foreground(truncate(col.label, columnWidths[idx] - 2))}</Text>
             </Box>
           ))}
         </Box>
@@ -248,7 +250,7 @@ export default function DataTable({
         <Box>
           {visibleColumns.map((col, idx) => (
             <Box key={`sep-${col.key}`} width={columnWidths[idx]} paddingX={1}>
-              <Text dimColor>{'─'.repeat(columnWidths[idx] - 2)}</Text>
+              <Text>{theme.border('─'.repeat(columnWidths[idx] - 2))}</Text>
             </Box>
           ))}
         </Box>
@@ -275,7 +277,7 @@ export default function DataTable({
                 return (
                   <Box key={`cell-${rowIdx}-${col.key}`} width={columnWidths[colIdx]} paddingX={1}>
                     {isSelected ? (
-                      <Text inverse color="cyan">{truncated}</Text>
+                      <Text>{theme.selectionInverse(truncated)}</Text>
                     ) : (
                       <Text>{truncated}</Text>
                     )}
@@ -290,12 +292,8 @@ export default function DataTable({
       {/* Footer / Pagination */}
       <Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={1}>
         <Box justifyContent="space-between" width="100%">
-          <Text dimColor>
-            Page {currentPage + 1} of {totalPages}
-          </Text>
-          <Text dimColor>
-            ↑/↓: Navigate  •  PgUp/PgDn: Page  •  Enter: Detail  •  Esc: Back  •  q: Quit
-          </Text>
+          <Text>{theme.muted(`Page ${currentPage + 1} of ${totalPages}`)}</Text>
+          <Text>{theme.mutedForeground('↑/↓: Navigate  •  PgUp/PgDn: Page  •  Enter: Detail  •  /: Search  •  Esc: Back  •  q: Quit')}</Text>
         </Box>
       </Box>
     </Box>

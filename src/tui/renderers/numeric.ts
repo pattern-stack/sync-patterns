@@ -4,8 +4,8 @@
  * Handles number, money, and percent types
  */
 
-import chalk from 'chalk';
 import { terminalCapabilities } from '../utils/terminal.js';
+import { themedChalk } from '../utils/theme.js';
 
 /**
  * Format money values
@@ -58,7 +58,7 @@ export function formatNumber(
 }
 
 /**
- * Render money value with green color
+ * Render money value with success color
  */
 export function renderMoney(
   value: unknown,
@@ -70,7 +70,7 @@ export function renderMoney(
     options?.decimals ?? 2,
     options?.locale ?? 'en-US'
   );
-  return terminalCapabilities.color ? chalk.green(formatted) : formatted;
+  return terminalCapabilities.color ? themedChalk.success(formatted) : formatted;
 }
 
 /**

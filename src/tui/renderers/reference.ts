@@ -18,6 +18,9 @@ const ENTITY_ICONS = {
   product: getSymbol('📦', 'Pr'),
   order: getSymbol('📋', 'O'),
   contact: getSymbol('📇', 'Ct'),
+  account: getSymbol('🏦', 'A'),
+  user: getSymbol('👤', 'U'),
+  default: getSymbol('📄', 'R'),
 } as const;
 
 /**
@@ -37,18 +40,54 @@ function getInitials(name: string): string {
  */
 export function renderEntity(
   value: unknown,
-  options?: { type?: keyof typeof ENTITY_ICONS; showIcon?: boolean }
+  options?: {
+    type?: keyof typeof ENTITY_ICONS;
+    showIcon?: boolean;
+    displayName?: string;
+    isLink?: boolean;
+    isLoading?: boolean;
+    notFound?: boolean;
+  }
 ): string {
-  const name = String(value);
-  const type = options?.type ?? 'customer';
+  const rawValue = String(value);
+  const type = options?.type ?? 'default';
   const showIcon = options?.showIcon ?? true;
+  const isLink = options?.isLink ?? false;
+  const isLoading = options?.isLoading ?? false;
+  const notFound = options?.notFound ?? false;
 
-  if (!showIcon) {
-    return name;
+  // Use display name if provided, otherwise use raw value
+  const name = options?.displayName ?? rawValue;
+
+  // Handle loading state
+  if (isLoading) {
+    return chalk.dim('Loading...');
   }
 
-  const icon = ENTITY_ICONS[type] ?? ENTITY_ICONS.customer;
-  return `${icon} ${name}`;
+  // Handle not found state (deleted/orphaned reference)
+  if (notFound) {
+    return chalk.dim(`(deleted) ${rawValue.slice(0, 8)}`);
+  }
+
+  // Build the display string
+  let display = name;
+
+  if (showIcon) {
+    const icon = ENTITY_ICONS[type] ?? ENTITY_ICONS.default;
+    display = `${icon} ${name}`;
+  }
+
+  // Add link indicator if this is a clickable link
+  if (isLink) {
+    display = `${display} ${chalk.cyan('→')}`;
+  }
+
+  // Color the display based on state
+  if (isLink) {
+    return chalk.cyan(display);
+  }
+
+  return display;
 }
 
 /**

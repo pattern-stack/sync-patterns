@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted**
+**Accepted** (Amended 2025-12-28)
 
 ## Date
 
@@ -24,26 +24,86 @@ We evaluated several sync engine candidates:
 - **TanStack DB** - Client-side reactive store (not a full sync solution)
 - **Convex** - Turnkey but requires their backend
 
-## Decision
+---
 
-We will use **TanStack DB + TanStack Query + ElectricSQL** as our sync stack:
+## Current Implementation (2025-12-28)
 
-- **TanStack Query** - Network layer, caching, API calls (many teams already use this)
-- **TanStack DB** - Client-side reactive store with normalized storage, live queries, and optimistic mutations
-- **ElectricSQL** - Sync engine for real-time Postgres → SQLite synchronization
+**Stack: TanStack DB + TanStack Query + Broadcast**
 
 ```
 Backend-patterns (Postgres)
         │
-        ▼
-   ElectricSQL (sync engine)
-        │
-        ▼
-   TanStack DB (client store) + TanStack Query (network layer)
-        │
-        ▼
-Frontend-patterns (React + SQLite)
+        ├──────────────────────────────┐
+        ▼                              ▼
+   REST API                    WebSocket Broadcast
+        │                              │
+        ▼                              ▼
+   TanStack Query              BroadcastProvider
+   (network layer)             (cache invalidation)
+        │                              │
+        └──────────┬───────────────────┘
+                   ▼
+            TanStack DB
+         (normalized store)
+                   │
+                   ▼
+            Live Queries
+         (reactive UI updates)
 ```
+
+**What this provides:**
+- ✅ Normalized storage (same entity = single object across queries)
+- ✅ Live queries (mutations update all subscribers instantly)
+- ✅ Optimistic updates (UI instant, API confirms in background)
+- ✅ Cross-client sync (broadcast triggers refetch)
+- ❌ Offline persistence (deferred - data lost on refresh)
+
+**See:** [SYNC-014: TanStack DB as Primary Data Layer](../specs/SYNC-014-tanstack-db-collections.md)
+
+---
+
+## Target Architecture (When Offline Required)
+
+**Stack: TanStack DB + TanStack Query + PGlite + ElectricSQL**
+
+```
+Backend-patterns (Postgres)
+        │
+        ├──────────────────────────────┐
+        ▼                              ▼
+   ElectricSQL                  WebSocket Broadcast
+   (Postgres → PGlite sync)     (change notifications)
+        │                              │
+        ▼                              ▼
+      PGlite                    BroadcastProvider
+   (local Postgres WASM)               │
+        │                              │
+        └──────────┬───────────────────┘
+                   ▼
+            TanStack DB
+         (normalized store)
+                   │
+                   ▼
+            Live Queries
+```
+
+**What this adds:**
+- ✅ Offline reads (PGlite persists data locally)
+- ✅ Offline writes (queue mutations, sync when online)
+- ✅ Automatic sync (Electric handles Postgres replication)
+
+**Trigger:** When offline support becomes a hard requirement for sales-patterns or aloevera.
+
+---
+
+## Original Decision
+
+We will use **TanStack DB + TanStack Query** as our client stack, with **ElectricSQL + PGlite** added when offline is required:
+
+- **TanStack Query** - Network layer, caching, API calls (many teams already use this)
+- **TanStack DB** - Client-side reactive store with normalized storage, live queries, and optimistic mutations
+- **PGlite** - Postgres in WASM (same SQL as backend, persistence)
+- **ElectricSQL** - Sync engine for real-time Postgres → PGlite replication
 
 ## Consequences
 
@@ -63,7 +123,7 @@ Frontend-patterns (React + SQLite)
 
 ### Neutral
 
-- SQLite on frontend is standard for local-first; frontend-patterns will own this decision
+- PGlite on frontend gives same SQL as backend (Postgres everywhere)
 - Lock-in to TanStack ecosystem (but it's widely adopted and open source)
 
 ## Alternatives Considered
@@ -87,10 +147,11 @@ Frontend-patterns (React + SQLite)
 
 ## References
 
+- [SYNC-014: TanStack DB as Primary Data Layer](../specs/SYNC-014-tanstack-db-collections.md)
+- [SYNC-012: Broadcast + Optimistic Sync](../specs/SYNC-012-broadcast-optimistic-sync.md)
 - [TanStack DB Overview](https://tanstack.com/db/latest/docs/overview)
-- [Electric Collection Docs](https://tanstack.com/db/latest/docs/collections/electric-collection)
+- [PGlite Documentation](https://pglite.dev/)
 - [ElectricSQL Documentation](https://electric-sql.com/docs)
-- [TanStack DB 0.5 - Query-Driven Sync](https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync)
 
 ---
 
@@ -99,3 +160,5 @@ Frontend-patterns (React + SQLite)
 | Date | Change | Author |
 |------|--------|--------|
 | 2025-11-29 | Initial decision | Planning session |
+| 2025-12-26 | Amended: Electric deferred, using TanStack Query + Broadcast | Review session |
+| 2025-12-28 | Clarified: TanStack DB is primary data layer (SYNC-014), PGlite replaces SQLite | Review session |

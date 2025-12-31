@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { Box, Text, useInput } from 'ink'
-import chalk from 'chalk'
+import { useTheme } from './ThemeProvider.js'
 
 export interface HelpOverlayProps {
   /** Callback when help overlay should close */
@@ -65,6 +65,8 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
  * HelpOverlay component
  */
 export default function HelpOverlay({ onClose }: HelpOverlayProps) {
+  const theme = useTheme()
+
   // Close on any key press
   useInput(() => {
     onClose()
@@ -80,16 +82,16 @@ export default function HelpOverlay({ onClose }: HelpOverlayProps) {
     >
       {/* Header */}
       <Box justifyContent="center" marginBottom={1}>
-        <Text bold color="cyan">sync-patterns Explorer - Keyboard Shortcuts</Text>
+        <Text bold>{theme.primary('sync-patterns Explorer - Keyboard Shortcuts')}</Text>
       </Box>
 
       <Box marginBottom={1}>
-        <Text dimColor>Press any key to close</Text>
+        <Text>{theme.mutedForeground('Press any key to close')}</Text>
       </Box>
 
       {/* Separator */}
       <Box marginBottom={1}>
-        <Text dimColor>{'─'.repeat(76)}</Text>
+        <Text>{theme.border('─'.repeat(76))}</Text>
       </Box>
 
       {/* Shortcut groups */}
@@ -98,16 +100,16 @@ export default function HelpOverlay({ onClose }: HelpOverlayProps) {
           <Box key={group.title} flexDirection="column" marginBottom={1}>
             {/* Group title */}
             <Box marginBottom={0}>
-              <Text bold color="yellow">{group.title}</Text>
+              <Text bold>{theme.accent(group.title)}</Text>
             </Box>
 
             {/* Shortcuts in this group */}
             {group.shortcuts.map((shortcut, index) => (
               <Box key={`${group.title}-${index}`} marginLeft={2}>
                 <Box width={20}>
-                  <Text color="cyan">{shortcut.key}</Text>
+                  <Text>{theme.primary(shortcut.key)}</Text>
                 </Box>
-                <Text dimColor>{shortcut.description}</Text>
+                <Text>{theme.mutedForeground(shortcut.description)}</Text>
               </Box>
             ))}
 
@@ -123,12 +125,12 @@ export default function HelpOverlay({ onClose }: HelpOverlayProps) {
 
       {/* Footer */}
       <Box marginTop={1}>
-        <Text dimColor>{'─'.repeat(76)}</Text>
+        <Text>{theme.border('─'.repeat(76))}</Text>
       </Box>
 
       <Box justifyContent="center" marginTop={1}>
-        <Text dimColor>
-          For more info: {chalk.cyan('https://github.com/pattern-stack/sync-patterns')}
+        <Text>
+          {theme.mutedForeground('For more info: ')}{theme.info('https://github.com/pattern-stack/sync-patterns')}
         </Text>
       </Box>
     </Box>

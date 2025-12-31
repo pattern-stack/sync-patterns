@@ -13,6 +13,7 @@ import { getTokenForUrl } from '../utils/auth-config.js'
 export interface ExploreOptions {
   entity?: string
   apiUrl?: string
+  apiPrefix?: string
   id?: string
   mode?: 'optimistic' | 'confirmed'
   noCache?: boolean
@@ -24,6 +25,16 @@ export interface ExploreOptions {
   generatedDir?: string
   list?: boolean
   token?: string
+}
+
+/**
+ * Build full API URL from base URL and prefix
+ */
+function buildFullUrl(baseUrl: string, prefix?: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  if (!prefix) return base
+  const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '')
+  return `${base}/${cleanPrefix}`
 }
 
 async function checkGeneratedCode(outputDir: string): Promise<boolean> {
@@ -139,17 +150,20 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
     const { default: App } = await import('../../tui/App.js')
 
     // Get auth token: flag > env > saved config
-    const apiUrl = options.apiUrl || process.env.SYNC_PATTERNS_API_URL
-    if (!apiUrl) {
+    const baseApiUrl = options.apiUrl || process.env.SYNC_PATTERNS_API_URL
+    if (!baseApiUrl) {
       console.error('Error: --api-url is required (or set SYNC_PATTERNS_API_URL)')
       process.exit(1)
     }
+    const apiPrefix = options.apiPrefix || process.env.SYNC_PATTERNS_API_PREFIX || ''
+    const fullApiUrl = buildFullUrl(baseApiUrl, apiPrefix)
+
     let authToken = options.token || process.env.SYNC_PATTERNS_AUTH_TOKEN
 
     if (!authToken) {
-      authToken = await getTokenForUrl(apiUrl) || undefined
+      authToken = await getTokenForUrl(fullApiUrl) || undefined
       if (authToken && options.debug) {
-        console.log(`Using saved token for ${apiUrl}`)
+        console.log(`Using saved token for ${fullApiUrl}`)
       }
     }
 
@@ -157,7 +171,7 @@ export async function exploreCommand(options: ExploreOptions): Promise<void> {
     const { unmount, waitUntilExit } = render(
       React.createElement(App, {
         entity: options.entity,
-        apiUrl,
+        apiUrl: fullApiUrl,
         recordId: options.id,
         mode: options.mode,
         noCache: options.noCache || false,

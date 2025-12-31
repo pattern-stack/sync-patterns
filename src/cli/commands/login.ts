@@ -9,8 +9,19 @@ import { saveToken, clearToken, getTokenForUrl } from '../utils/auth-config.js'
 
 export interface LoginOptions {
   apiUrl: string
+  apiPrefix?: string
   email?: string
   logout?: boolean
+}
+
+/**
+ * Build full API URL from base URL and prefix
+ */
+function buildFullUrl(baseUrl: string, prefix?: string): string {
+  const base = baseUrl.replace(/\/+$/, '')
+  if (!prefix) return base
+  const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '')
+  return `${base}/${cleanPrefix}`
 }
 
 function prompt(question: string, hidden = false): Promise<string> {
@@ -73,26 +84,26 @@ interface LoginResponse {
 }
 
 export async function loginCommand(options: LoginOptions): Promise<void> {
-  const apiUrl = options.apiUrl.replace(/\/+$/, '')
+  const fullApiUrl = buildFullUrl(options.apiUrl, options.apiPrefix)
 
   // Handle logout
   if (options.logout) {
-    await clearToken(apiUrl)
-    console.log(`Logged out from ${apiUrl}`)
+    await clearToken(fullApiUrl)
+    console.log(`Logged out from ${fullApiUrl}`)
     return
   }
 
   // Check if already logged in
-  const existingToken = await getTokenForUrl(apiUrl)
+  const existingToken = await getTokenForUrl(fullApiUrl)
   if (existingToken) {
-    console.log(`Already logged in to ${apiUrl}`)
+    console.log(`Already logged in to ${fullApiUrl}`)
     const answer = await prompt('Do you want to re-authenticate? (y/N) ')
     if (answer.toLowerCase() !== 'y') {
       return
     }
   }
 
-  console.log(`\nLogging in to ${apiUrl}\n`)
+  console.log(`\nLogging in to ${fullApiUrl}\n`)
 
   // Get credentials
   const email = options.email || await prompt('Email: ')
@@ -105,7 +116,7 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
   // Call login endpoint
   try {
-    const response = await fetch(`${apiUrl}/auth/login`, {
+    const response = await fetch(`${fullApiUrl}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -133,19 +144,19 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 
     // Save token
     await saveToken(
-      apiUrl,
+      fullApiUrl,
       data.access_token,
       data.refresh_token,
       data.expires_in
     )
 
     console.log('\nLogin successful!')
-    console.log(`Token saved for ${apiUrl}`)
+    console.log(`Token saved for ${fullApiUrl}`)
     console.log('\nYou can now run:')
-    console.log(`  sync-patterns explore --api-url ${apiUrl}`)
+    console.log(`  sync-patterns explore --api-url ${fullApiUrl}`)
   } catch (error) {
     if (error instanceof Error && error.message.includes('fetch')) {
-      console.error(`\nError: Could not connect to ${apiUrl}`)
+      console.error(`\nError: Could not connect to ${fullApiUrl}`)
       console.error('Make sure the API server is running.')
     } else {
       console.error('\nError:', error instanceof Error ? error.message : error)

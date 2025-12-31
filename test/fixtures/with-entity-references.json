@@ -1,0 +1,307 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Entity Reference API",
+    "version": "1.0.0",
+    "description": "Test fixture for entity reference resolution (x-ui-reference)"
+  },
+  "paths": {
+    "/api/v1/transactions": {
+      "get": {
+        "operationId": "list_transactions",
+        "tags": ["Transactions"],
+        "summary": "List all transactions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transactions/{transaction_id}": {
+      "get": {
+        "operationId": "get_transaction",
+        "tags": ["Transactions"],
+        "summary": "Get a transaction by ID",
+        "parameters": [
+          {
+            "name": "transaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "operationId": "list_categories",
+        "tags": ["Categories"],
+        "summary": "List all categories",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories/{category_id}": {
+      "get": {
+        "operationId": "get_category",
+        "tags": ["Categories"],
+        "summary": "Get a category by ID",
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts": {
+      "get": {
+        "operationId": "list_accounts",
+        "tags": ["Accounts"],
+        "summary": "List all accounts",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}": {
+      "get": {
+        "operationId": "get_account",
+        "tags": ["Accounts"],
+        "summary": "Get an account by ID",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Transaction": {
+        "type": "object",
+        "required": ["id", "amount", "category_id", "account_id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "number",
+            "x-ui-type": "money",
+            "x-ui-importance": "high",
+            "x-ui-format": {"currency": "USD", "decimals": 2}
+          },
+          "description": {
+            "type": "string",
+            "x-ui-importance": "medium"
+          },
+          "category_id": {
+            "type": "string",
+            "format": "uuid",
+            "x-ui-type": "entity",
+            "x-ui-importance": "high",
+            "x-ui-reference": {
+              "entity": "categories",
+              "displayField": "name"
+            }
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "x-ui-type": "entity",
+            "x-ui-importance": "high",
+            "x-ui-reference": {
+              "entity": "accounts",
+              "displayField": "title"
+            }
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "x-ui-type": "user",
+            "x-ui-importance": "low",
+            "x-ui-reference": {
+              "entity": "users"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "x-ui-importance": "low"
+          }
+        }
+      },
+      "TransactionListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transaction"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Category": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "x-ui-importance": "critical"
+          },
+          "color": {
+            "type": "string",
+            "x-ui-type": "color"
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "x-ui-type": "entity",
+            "x-ui-reference": {
+              "entity": "categories",
+              "displayField": "name"
+            }
+          }
+        }
+      },
+      "CategoryListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "x-ui-importance": "critical"
+          },
+          "balance": {
+            "type": "number",
+            "x-ui-type": "money",
+            "x-ui-format": {"currency": "USD", "decimals": 2}
+          }
+        }
+      },
+      "AccountListResponse": {
+        "type": "object",
+        "required": ["items", "total"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Account"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

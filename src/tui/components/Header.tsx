@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import chalk from 'chalk'
+import { useTheme } from './ThemeProvider.js'
 
 export interface HeaderProps {
   /** Current entity name (if viewing entity) */
@@ -22,15 +22,17 @@ export interface HeaderProps {
 /**
  * Get sync mode indicator with symbol and label
  */
-function getSyncModeIndicator(mode?: 'optimistic' | 'confirmed' | 'auto'): string {
+function useSyncModeIndicator(mode?: 'optimistic' | 'confirmed' | 'auto'): string {
+  const theme = useTheme()
+
   switch (mode) {
     case 'optimistic':
-      return chalk.green('● Realtime')
+      return theme.success('● Realtime')
     case 'confirmed':
-      return chalk.yellow('○ API')
+      return theme.warning('○ API')
     case 'auto':
     default:
-      return chalk.cyan('◐ Auto')
+      return theme.info('◐ Auto')
   }
 }
 
@@ -62,7 +64,8 @@ function truncateUrl(url: string, maxLength: number = 60): string {
  * Header component
  */
 export default function Header({ entityName, mode, apiUrl, view }: HeaderProps) {
-  const syncIndicator = getSyncModeIndicator(mode)
+  const theme = useTheme()
+  const syncIndicator = useSyncModeIndicator(mode)
   const truncatedUrl = truncateUrl(apiUrl)
 
   return (
@@ -71,9 +74,9 @@ export default function Header({ entityName, mode, apiUrl, view }: HeaderProps) 
         {/* Title row */}
         <Box justifyContent="space-between">
           <Box>
-            <Text bold color="cyan">sync-patterns Explorer</Text>
+            <Text bold>{theme.primary('sync-patterns Explorer')}</Text>
             {entityName && view !== 'entity-list' && (
-              <Text color="cyan"> / {entityName}</Text>
+              <Text> {theme.primary('/')} {theme.foreground(entityName)}</Text>
             )}
           </Box>
           <Text>{syncIndicator}</Text>
@@ -81,7 +84,7 @@ export default function Header({ entityName, mode, apiUrl, view }: HeaderProps) 
 
         {/* API URL row */}
         <Box marginTop={1}>
-          <Text dimColor>API: {truncatedUrl}</Text>
+          <Text>{theme.muted('API:')} {theme.mutedForeground(truncatedUrl)}</Text>
         </Box>
       </Box>
     </Box>

@@ -6,14 +6,17 @@
  * - Fields grouped by ui_group (identification, financial, etc.)
  * - Boxed sections with group headers
  * - Field-aware rendering using UIType renderers
- * - Keyboard navigation (↑/↓ scroll, b/Esc back, e edit, d delete)
+ * - Keyboard navigation (↑/↓ scroll, b/Esc back, e edit, d delete, Enter on linked records)
  * - Metadata section (created_at, updated_at, id)
+ * - Linked record display for foreign keys
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
-import chalk from 'chalk'
 import { renderField, type UIType, type FieldFormat } from '../renderers/index.js'
+import EditModal, { type EditField } from './EditModal.js'
+import { detectForeignKey } from '../hooks/useLinkedRecord.js'
+import { useTheme } from './ThemeProvider.js'
 
 /**
  * Field definition
@@ -45,6 +48,8 @@ export interface DetailViewProps {
   title?: string
   /** Entity name (for header) */
   entityName?: string
+  /** Record ID (required for edit) */
+  recordId?: string
   /** Loading state */
   loading?: boolean
   /** Error state */
@@ -55,6 +60,10 @@ export interface DetailViewProps {
   onEdit?: () => void
   /** Callback when delete is pressed (d) */
   onDelete?: () => void
+  /** Callback when record is updated */
+  onUpdate?: (updatedData: Record<string, unknown>) => void
+  /** Callback when navigating to a linked record (Enter on foreign key field) */
+  onNavigateToLinkedRecord?: (entityType: string, recordId: string) => void
 }
 
 /**
@@ -83,13 +92,27 @@ export default function DetailView({
   fields: providedFields,
   title,
   entityName = 'Record',
+  recordId,
   loading = false,
   error = null,
   onBack,
   onEdit,
   onDelete,
+  onUpdate,
+  onNavigateToLinkedRecord,
 }: DetailViewProps) {
+  const theme = useTheme()
   const [scrollOffset, setScrollOffset] = useState(0)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [currentData, setCurrentData] = useState(data)
+  const [selectedFieldIndex, setSelectedFieldIndex] = useState(0)
+
+  // Sync currentData with data prop changes
+  // This is needed because useState only uses initial value on mount,
+  // so prop updates wouldn't otherwise update currentData
+  useEffect(() => {
+    setCurrentData(data)
+  }, [data])
 
   // Infer fields from data if not provided
   const fields = useMemo(() => {
@@ -97,15 +120,15 @@ export default function DetailView({
       return providedFields
     }
 
-    // Infer from data
-    return Object.keys(data).map((key) => ({
+    // Infer from currentData
+    return Object.keys(currentData).map((key) => ({
       key,
       label: formatLabel(key),
-      uiType: inferUIType(data[key]),
+      uiType: inferUIType(currentData[key]),
       uiGroup: METADATA_KEYS.includes(key) ? 'metadata' : 'general',
       importance: 0,
     }))
-  }, [providedFields, data])
+  }, [providedFields, currentData])
 
   // Separate fields into groups
   const fieldGroups = useMemo(() => {
@@ -141,19 +164,51 @@ export default function DetailView({
     return sortedGroups
   }, [fields])
 
+  // Create flat list of all fields for navigation
+  const allFields = useMemo(() => {
+    const flat: DetailField[] = []
+    for (const groupFields of fieldGroups.values()) {
+      flat.push(...groupFields)
+    }
+    return flat
+  }, [fieldGroups])
+
   // Keyboard navigation
   useInput((input, key) => {
+    // Don't handle input when modal is open
+    if (showEditModal) return
+
     if (loading) return
 
-    // Scroll up
+    // Navigate between fields (up/down arrows)
     if (key.upArrow) {
-      setScrollOffset(Math.max(0, scrollOffset - 1))
+      setSelectedFieldIndex((prev) => Math.max(0, prev - 1))
     }
 
-    // Scroll down
     if (key.downArrow) {
-      const maxScroll = Math.max(0, fieldGroups.size * 5 - 10) // Rough estimate
-      setScrollOffset(Math.min(maxScroll, scrollOffset + 1))
+      setSelectedFieldIndex((prev) => Math.min(allFields.length - 1, prev + 1))
+    }
+
+    // Navigate to linked record (Enter on foreign key field)
+    if (key.return && onNavigateToLinkedRecord) {
+      const selectedField = allFields[selectedFieldIndex]
+      if (selectedField) {
+        const fieldValue = currentData[selectedField.key]
+
+        // Check if this is a foreign key field
+        const foreignEntityType = detectForeignKey(selectedField.key)
+
+        if (foreignEntityType && typeof fieldValue === 'string') {
+          onNavigateToLinkedRecord(foreignEntityType, fieldValue)
+        } else if (selectedField.uiType === 'entity' && typeof fieldValue === 'string') {
+          // Also support explicit entity UIType
+          // Try to infer entity type from field name
+          const entityType = detectForeignKey(selectedField.key)
+          if (entityType) {
+            onNavigateToLinkedRecord(entityType, fieldValue)
+          }
+        }
+      }
     }
 
     // Back (b or Esc)
@@ -168,8 +223,10 @@ export default function DetailView({
       if (onEdit) {
         onEdit()
       } else {
-        // Show "coming soon" message for now
-        console.log(chalk.yellow('Edit functionality coming soon (Issue 10)'))
+        // Open edit modal if recordId is available
+        if (recordId) {
+          setShowEditModal(true)
+        }
       }
     }
 
@@ -177,18 +234,15 @@ export default function DetailView({
     if (input === 'd' && !key.meta && !key.ctrl) {
       if (onDelete) {
         onDelete()
-      } else {
-        // Show "coming soon" message for now
-        console.log(chalk.yellow('Delete functionality coming soon (Issue 11)'))
       }
     }
-  })
+  }, [loading, showEditModal, selectedFieldIndex, allFields, currentData, onNavigateToLinkedRecord, onBack, onEdit, onDelete, recordId])
 
   // Loading state
   if (loading) {
     return (
       <Box flexDirection="column" padding={2}>
-        <Text color="cyan">Loading {entityName}...</Text>
+        <Text>{theme.info(`Loading ${entityName}...`)}</Text>
       </Box>
     )
   }
@@ -198,48 +252,79 @@ export default function DetailView({
     return (
       <Box flexDirection="column" padding={2}>
         <Box marginBottom={1}>
-          <Text color="red" bold>
-            Error loading {entityName}
-          </Text>
+          <Text bold>{theme.error(`Error loading ${entityName}`)}</Text>
         </Box>
-        <Text color="red">{error.message}</Text>
+        <Text>{theme.error(error.message)}</Text>
         <Box marginTop={1}>
-          <Text dimColor>Press b or Esc to go back</Text>
+          <Text>{theme.mutedForeground('Press b or Esc to go back')}</Text>
         </Box>
       </Box>
     )
   }
 
+  // Convert fields to EditFields format
+  const editFields: EditField[] = fields.map((field) => ({
+    key: field.key,
+    label: field.label,
+    uiType: field.uiType,
+    format: field.format,
+    required: false, // Could be derived from field metadata in the future
+    readOnly: METADATA_KEYS.includes(field.key),
+  }))
+
+  // Handle successful edit
+  const handleEditSuccess = (updatedData: Record<string, unknown>) => {
+    setCurrentData(updatedData)
+    setShowEditModal(false)
+    if (onUpdate) {
+      onUpdate(updatedData)
+    }
+  }
+
   // Record title (use provided title or try to infer from name/title field)
-  const recordTitle = title || (data.name as string) || (data.title as string) || `${entityName} Detail`
+  const recordTitle =
+    title || (currentData.name as string) || (currentData.title as string) || `${entityName} Detail`
 
   return (
     <Box flexDirection="column">
-      {/* Header */}
-      <Box borderStyle="single" borderColor="cyan" paddingX={1} marginBottom={1}>
-        <Text>
-          <Text bold color="cyan">
-            {entityName}:{' '}
-          </Text>
-          <Text>{recordTitle}</Text>
-        </Text>
-      </Box>
+      {/* Show edit modal if open */}
+      {showEditModal && recordId && (
+        <EditModal
+          data={currentData}
+          fields={editFields}
+          entityName={entityName}
+          recordId={recordId}
+          onSuccess={handleEditSuccess}
+          onClose={() => setShowEditModal(false)}
+        />
+      )}
 
-      {/* Content - Scrollable groups */}
-      <Box flexDirection="column">
-        {Array.from(fieldGroups.entries()).map(([groupName, groupFields]) => (
-          <Box key={groupName} flexDirection="column" marginBottom={1}>
-            {renderGroup(groupName, groupFields, data)}
+      {/* Only show detail view when modal is not open */}
+      {!showEditModal && (
+        <>
+          {/* Header */}
+          <Box borderStyle="single" borderColor="cyan" paddingX={1} marginBottom={1}>
+            <Text>
+              <Text bold>{theme.primary(`${entityName}: `)}</Text>
+              <Text>{theme.foreground(recordTitle)}</Text>
+            </Text>
           </Box>
-        ))}
-      </Box>
 
-      {/* Footer */}
-      <Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={1}>
-        <Text dimColor>
-          b: Back  •  e: Edit  •  d: Delete  •  q: Quit
-        </Text>
-      </Box>
+          {/* Content - Scrollable groups */}
+          <Box flexDirection="column">
+            {Array.from(fieldGroups.entries()).map(([groupName, groupFields]) => (
+              <Box key={groupName} flexDirection="column" marginBottom={1}>
+                {renderGroup(groupName, groupFields, currentData, theme)}
+              </Box>
+            ))}
+          </Box>
+
+          {/* Footer */}
+          <Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={1}>
+            <Text>{theme.mutedForeground('b: Back  •  e: Edit  •  d: Delete  •  q: Quit')}</Text>
+          </Box>
+        </>
+      )}
     </Box>
   )
 }
@@ -247,7 +332,7 @@ export default function DetailView({
 /**
  * Render a field group with boxed section
  */
-function renderGroup(groupName: string, groupFields: DetailField[], data: Record<string, unknown>) {
+function renderGroup(groupName: string, groupFields: DetailField[], data: Record<string, unknown>, theme: ReturnType<typeof useTheme>) {
   const groupTitle = formatGroupTitle(groupName)
 
   // Calculate max label width for alignment
@@ -257,9 +342,9 @@ function renderGroup(groupName: string, groupFields: DetailField[], data: Record
     <Box flexDirection="column">
       {/* Group header with box drawing characters */}
       <Box>
-        <Text dimColor>╭─ </Text>
-        <Text bold>{groupTitle}</Text>
-        <Text dimColor> {'─'.repeat(Math.max(0, 60 - groupTitle.length))}╮</Text>
+        <Text>{theme.border('╭─ ')}</Text>
+        <Text bold>{theme.primary(groupTitle)}</Text>
+        <Text>{theme.border(` ${'─'.repeat(Math.max(0, 60 - groupTitle.length))}╮`)}</Text>
       </Box>
 
       {/* Group fields */}
@@ -271,8 +356,8 @@ function renderGroup(groupName: string, groupFields: DetailField[], data: Record
 
           return (
             <Box key={field.key}>
-              <Text dimColor>│  </Text>
-              <Text dimColor>{label}</Text>
+              <Text>{theme.border('│  ')}</Text>
+              <Text>{theme.muted(label)}</Text>
               <Text>  {rendered}</Text>
             </Box>
           )
@@ -281,7 +366,7 @@ function renderGroup(groupName: string, groupFields: DetailField[], data: Record
 
       {/* Group footer */}
       <Box>
-        <Text dimColor>╰{'─'.repeat(68)}╯</Text>
+        <Text>{theme.border(`╰${'─'.repeat(68)}╯`)}</Text>
       </Box>
     </Box>
   )

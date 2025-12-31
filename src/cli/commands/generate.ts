@@ -8,13 +8,11 @@ import { promises as fs } from 'fs'
 import { join, dirname } from 'path'
 import { loadOpenAPISpec, parseOpenAPI } from '../../generators/parser.js'
 import { generateZodSchemas } from '../../generators/zod-generator.js'
-import { generateAPIClient } from '../../generators/client-generator.js'
-import { generateHooks } from '../../generators/hook-generator.js'
-import { generateCollections } from '../../generators/collection-generator.js'
-import { generateEntityWrappers } from '../../generators/entity-generator.js'
-import { generateConfig } from '../../generators/config-generator.js'
-import { generateEntitiesHook } from '../../generators/entities-hook-generator.js'
-import { EntityResolver, ApiGenerator, HookGenerator } from '../../core/index.js'
+import { generateColumnMetadata } from '../../generators/column-metadata-generator.js'
+import { generateFieldRenderers } from '../../generators/field-renderer-generator.js'
+import { generateEntityConfigs } from '../../generators/entity-config-generator.js'
+import { generateColumnHooks } from '../../generators/column-hook-generator.js'
+import { EntityResolver, ApiGenerator, HookGenerator, EntityStoreGenerator, CollectionGenerator, EntityHookGenerator } from '../../core/index.js'
 import type { OpenAPIV3 } from 'openapi-types'
 
 export interface GenerateOptions {
@@ -22,15 +20,22 @@ export interface GenerateOptions {
   schemas: boolean
   client: boolean
   hooks: boolean
+  store: boolean
+  // TanStack DB generators (SYNC-014)
   collections: boolean
   entities: boolean
+  // UI Metadata generators
+  columns: boolean
+  renderers: boolean
+  entityConfigs: boolean
+  columnHooks: boolean
+  // Other options
   apiUrl?: string
   apiUrlEnv?: string
   timeout?: string
   authTokenKey?: string
   dryRun?: boolean
   verbose?: boolean
-  useLegacyGenerators?: boolean
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -106,7 +111,24 @@ async function generateWithNewArchitecture(
     console.log(`Written React hooks to ${hooksDir}/`)
   }
 
-  // 4. Zod schemas (KEEP OLD - works fine)
+  // 4. Generate EntityStore (NEW)
+  if (options.store) {
+    console.log('\nGenerating EntityStore...')
+    const storeGenerator = new EntityStoreGenerator()
+    const store = storeGenerator.generate(model)
+
+    const storeDir = join(options.output, 'store')
+    await ensureDir(storeDir)
+
+    // Write store files
+    await writeFile(join(storeDir, 'EntityStore.ts'), store.store)
+    await writeFile(join(storeDir, 'EntityStoreProvider.tsx'), store.provider)
+    await writeFile(join(storeDir, 'index.ts'), store.index)
+
+    console.log(`Written EntityStore to ${storeDir}/`)
+  }
+
+  // 5. Zod schemas (KEEP OLD - works fine)
   if (options.schemas) {
     console.log('\nGenerating Zod schemas...')
     // Use existing parseOpenAPI for zod-generator (until refactored)
@@ -143,97 +165,128 @@ async function generateWithNewArchitecture(
     )
   }
 
-  // 5. Collections (KEEP OLD for now - not affected by new generators)
+  // ==========================================================================
+  // TANSTACK DB GENERATORS (SYNC-014: TanStack DB as Primary Data Layer)
+  // ==========================================================================
+
+  // 6. TanStack DB Collections (normalized storage with relationships)
   if (options.collections) {
     console.log('\nGenerating TanStack DB collections...')
-    const parsed = await parseOpenAPI(spec)
-    const collections = generateCollections(parsed)
+    const collectionGenerator = new CollectionGenerator()
+    const collections = collectionGenerator.generate(model)
 
-    const totalCollections = collections.realtimeCollections.size + collections.offlineActions.size
-    if (totalCollections > 0) {
-      const collectionsDir = join(options.output, 'collections')
-      await ensureDir(collectionsDir)
+    const collectionsDir = join(options.output, 'collections')
+    await ensureDir(collectionsDir)
 
-      // Write realtime collections (ElectricSQL)
-      for (const [name, content] of collections.realtimeCollections) {
-        const fileName = `${toKebabCase(name)}.realtime.ts`
-        const filePath = join(collectionsDir, fileName)
-        await writeFile(filePath, content)
-        if (options.verbose) {
-          console.log(`  Written: ${filePath}`)
-        }
-      }
-
-      await writeFile(join(collectionsDir, 'index.ts'), collections.index)
-      console.log(`Written ${collections.realtimeCollections.size} realtime collections to ${collectionsDir}/`)
-
-      // Generate offline executor and actions if there are offline entities
-      if (collections.offlineActions.size > 0) {
-        console.log('\nGenerating offline executor and actions...')
-        const offlineDir = join(options.output, 'offline')
-        await ensureDir(offlineDir)
-
-        // Write offline executor singleton
-        if (collections.offlineExecutor) {
-          await writeFile(join(offlineDir, 'executor.ts'), collections.offlineExecutor)
-          if (options.verbose) {
-            console.log(`  Written: ${join(offlineDir, 'executor.ts')}`)
-          }
-        }
-
-        // Write offline actions for each entity
-        for (const [name, content] of collections.offlineActions) {
-          const fileName = `${toKebabCase(name)}.actions.ts`
-          const filePath = join(offlineDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
-        console.log(`Written offline executor and ${collections.offlineActions.size} action files to ${offlineDir}/`)
-      }
-    } else {
-      console.log('  No local_first: true entities found, skipping collections')
+    // Write entity collection files
+    for (const [name, content] of collections.entities) {
+      await writeFile(join(collectionsDir, `${toKebabCase(name)}.ts`), content)
     }
+
+    // Write shared files
+    await writeFile(join(collectionsDir, 'store.ts'), collections.store)
+    await writeFile(join(collectionsDir, 'index.ts'), collections.index)
+
+    console.log(`Written TanStack DB collections to ${collectionsDir}/`)
   }
 
-  // 6. Entity wrappers (KEEP OLD for now - not affected by new generators)
+  // 7. Unified Entity Hooks (THE public API for components)
   if (options.entities) {
-    console.log('\nGenerating runtime config...')
-    const parsed = await parseOpenAPI(spec)
-    const configResult = generateConfig(parsed)
-    await writeFile(join(options.output, 'config.ts'), configResult.config)
-    console.log(`Written config to ${options.output}/config.ts`)
+    console.log('\nGenerating unified entity hooks...')
+    const entityHookGenerator = new EntityHookGenerator()
+    const entityHooks = entityHookGenerator.generate(model)
 
-    console.log('\nGenerating entity wrappers...')
-    const entities = generateEntityWrappers(parsed)
+    const entitiesDir = join(options.output, 'entities')
+    await ensureDir(entitiesDir)
 
-    if (entities.wrappers.size > 0) {
-      const entitiesDir = join(options.output, 'entities')
-      await ensureDir(entitiesDir)
+    // Write entity hook files
+    for (const [name, content] of entityHooks.entities) {
+      await writeFile(join(entitiesDir, `${toKebabCase(name)}.ts`), content)
+    }
 
-      for (const [name, content] of entities.wrappers) {
-        const fileName = `${toKebabCase(name)}.ts`
-        const filePath = join(entitiesDir, fileName)
-        await writeFile(filePath, content)
+    // Write index
+    await writeFile(join(entitiesDir, 'index.ts'), entityHooks.index)
+
+    console.log(`Written unified entity hooks to ${entitiesDir}/`)
+  }
+
+  // ==========================================================================
+  // UI METADATA GENERATORS (Pattern Stack 2.0)
+  // ==========================================================================
+
+  // 8. Column Metadata (static column definitions from schemas)
+  if (options.columns) {
+    console.log('\nGenerating column metadata...')
+    const columnMetadata = generateColumnMetadata(model)
+
+    const columnsDir = join(options.output, 'columns')
+    await ensureDir(columnsDir)
+
+    // Write per-entity column files
+    for (const [entityName, content] of columnMetadata.columns) {
+      const entity = model.entities.get(entityName)
+      if (entity) {
+        const fileName = `${entity.singular}.columns.ts`
+        await writeFile(join(columnsDir, fileName), content)
         if (options.verbose) {
-          console.log(`  Written: ${filePath}`)
+          console.log(`  Written: ${fileName}`)
         }
       }
-
-      await writeFile(join(entitiesDir, 'index.ts'), entities.index)
-      await writeFile(join(entitiesDir, 'types.ts'), entities.types)
-      console.log(`Written ${entities.wrappers.size} entity wrappers to ${entitiesDir}/`)
-
-      // Generate entities-hook.tsx (aggregator for useEntities)
-      console.log('\nGenerating entities hook...')
-      const entitiesHook = generateEntitiesHook(parsed)
-      await writeFile(join(options.output, 'entities-hook.tsx'), entitiesHook.code)
-      console.log(`Written entities-hook.tsx to ${options.output}/`)
-    } else {
-      console.log('  No entities with CRUD operations found')
     }
+
+    // Write shared types and index
+    await writeFile(join(columnsDir, 'types.ts'), columnMetadata.types)
+    await writeFile(join(columnsDir, 'index.ts'), columnMetadata.index)
+
+    console.log(`Written ${columnMetadata.columns.size} column metadata files to ${columnsDir}/`)
+  }
+
+  // 9. Field Renderers (UIType → React component mapping)
+  if (options.renderers) {
+    console.log('\nGenerating field renderers...')
+    const renderers = generateFieldRenderers()
+
+    const renderersDir = join(options.output, 'renderers')
+    await ensureDir(renderersDir)
+
+    await writeFile(join(renderersDir, 'field-renderers.tsx'), renderers.renderers)
+    await writeFile(join(renderersDir, 'index.ts'), renderers.index)
+
+    console.log(`Written field renderers to ${renderersDir}/`)
+  }
+
+  // 10. Entity Configs (semantic field mapping)
+  if (options.entityConfigs) {
+    console.log('\nGenerating entity configs...')
+    const entityConfigs = generateEntityConfigs(model)
+
+    const configsDir = join(options.output, 'entity-configs')
+    await ensureDir(configsDir)
+
+    // Write per-entity config files
+    for (const [entityName, content] of entityConfigs.configs) {
+      const entity = model.entities.get(entityName)
+      if (entity) {
+        const fileName = `${entity.singular}.config.ts`
+        await writeFile(join(configsDir, fileName), content)
+        if (options.verbose) {
+          console.log(`  Written: ${fileName}`)
+        }
+      }
+    }
+
+    // Write shared types and index
+    await writeFile(join(configsDir, 'types.ts'), entityConfigs.types)
+    await writeFile(join(configsDir, 'index.ts'), entityConfigs.index)
+
+    console.log(`Written ${entityConfigs.configs.size} entity config files to ${configsDir}/`)
+  }
+
+  // 11. Column Hooks (runtime column metadata fetching)
+  // Note: Column hooks generation temporarily disabled pending refactor
+  // to remove dependency on deleted config generator
+  if (options.columnHooks) {
+    console.log('\nColumn hooks generation currently disabled (pending refactor)')
   }
 }
 
@@ -253,15 +306,8 @@ export async function generateCommand(
 
     if (options.dryRun) {
       console.log('\n[DRY RUN] Would generate:')
-      if (options.useLegacyGenerators) {
-        console.log('[Using legacy generator architecture]')
-        console.log(`  - API client in ${options.output}/client/`)
-        console.log(`  - React hooks in ${options.output}/hooks/`)
-      } else {
-        console.log('[Using new generator architecture]')
-        console.log(`  - API layer in ${options.output}/api/`)
-        console.log(`  - React hooks in ${options.output}/hooks/`)
-      }
+      console.log(`  - API layer in ${options.output}/api/`)
+      console.log(`  - React hooks in ${options.output}/hooks/`)
       if (options.schemas) {
         console.log(`  - Zod schemas in ${options.output}/schemas/`)
       }
@@ -269,268 +315,22 @@ export async function generateCommand(
         console.log(`  - TanStack DB collections in ${options.output}/collections/`)
       }
       if (options.entities) {
-        console.log(`  - Entity wrappers in ${options.output}/entities/`)
-        console.log(`  - Entities hook in ${options.output}/entities-hook.tsx`)
-        console.log(`  - Runtime config in ${options.output}/config.ts`)
+        console.log(`  - Unified entity hooks in ${options.output}/entities/`)
+      }
+      if (options.columns) {
+        console.log(`  - Column metadata in ${options.output}/columns/`)
+      }
+      if (options.renderers) {
+        console.log(`  - Field renderers in ${options.output}/renderers/`)
+      }
+      if (options.entityConfigs) {
+        console.log(`  - Entity configs in ${options.output}/entity-configs/`)
       }
       return
     }
 
-    // Use new architecture by default, legacy if explicitly requested
-    if (!options.useLegacyGenerators) {
-      return await generateWithNewArchitecture(spec, options)
-    }
-
-    // Old architecture path
-    console.log('Parsing specification...')
-    const parsed = await parseOpenAPI(spec)
-    console.log(
-      `Found ${parsed.endpoints.length} endpoints, ${parsed.schemas.length} schemas`
-    )
-
-    // Generate Zod schemas
-    if (options.schemas) {
-      console.log('\nGenerating Zod schemas...')
-      const schemas = generateZodSchemas(parsed)
-
-      // Write schema files
-      const schemasDir = join(options.output, 'schemas')
-      await ensureDir(schemasDir)
-
-      for (const [name, content] of schemas.schemas) {
-        const fileName = `${toKebabCase(name)}.schema.ts`
-        const filePath = join(schemasDir, fileName)
-        await writeFile(filePath, content)
-        if (options.verbose) {
-          console.log(`  Written: ${filePath}`)
-        }
-      }
-
-      // Write entity barrel files (e.g., accounts.ts groups account-related schemas)
-      for (const [entityName, content] of schemas.entityBarrels) {
-        const fileName = `${toKebabCase(entityName)}.ts`
-        const filePath = join(schemasDir, fileName)
-        await writeFile(filePath, content)
-        if (options.verbose) {
-          console.log(`  Written entity barrel: ${filePath}`)
-        }
-      }
-
-      // Write index file
-      await writeFile(join(schemasDir, 'index.ts'), schemas.index)
-      console.log(`Written ${schemas.schemas.size} schemas + ${schemas.entityBarrels.size} entity barrels to ${schemasDir}/`)
-
-      if (options.verbose) {
-        // Show a sample schema
-        const firstSchema = schemas.schemas.values().next().value
-        if (firstSchema) {
-          console.log('\nSample generated schema:')
-          console.log('------------------------')
-          console.log(firstSchema)
-        }
-      }
-    }
-
-    // Generate API client
-    if (options.client) {
-      console.log('\nGenerating API client...')
-      const client = generateAPIClient(parsed, {
-        baseUrl: options.apiUrl,
-        apiUrlEnvVar: options.apiUrlEnv || 'VITE_API_URL',
-        timeout: options.timeout ? parseInt(options.timeout, 10) : 10000,
-        authTokenKey: options.authTokenKey || 'auth_token',
-      })
-
-      // Write client files
-      const clientDir = join(options.output, 'client')
-      await ensureDir(clientDir)
-
-      await writeFile(join(clientDir, 'client.ts'), client.client)
-      await writeFile(join(clientDir, 'methods.ts'), client.methods)
-      await writeFile(join(clientDir, 'types.ts'), client.types)
-      await writeFile(join(clientDir, 'config.ts'), client.config)
-      await writeFile(join(clientDir, 'index.ts'), client.index)
-
-      console.log(`Written API client to ${clientDir}/`)
-    }
-
-    // Generate React hooks
-    if (options.hooks) {
-      console.log('\nGenerating React hooks...')
-      const hooks = await generateHooks(parsed)
-
-      // Write hook files
-      const hooksDir = join(options.output, 'hooks')
-      await ensureDir(hooksDir)
-
-      await writeFile(join(hooksDir, 'queries.ts'), hooks.queries)
-      await writeFile(join(hooksDir, 'mutations.ts'), hooks.mutations)
-      await writeFile(join(hooksDir, 'keys.ts'), hooks.keys)
-      await writeFile(join(hooksDir, 'types.ts'), hooks.types)
-      await writeFile(join(hooksDir, 'index.ts'), hooks.index)
-
-      console.log(`Written React hooks to ${hooksDir}/`)
-    }
-
-    // Generate TanStack DB collections (for local_first: true entities)
-    if (options.collections) {
-      console.log('\nGenerating TanStack DB collections...')
-      const collections = generateCollections(parsed)
-
-      const totalCollections = collections.realtimeCollections.size + collections.offlineActions.size
-      if (totalCollections > 0) {
-        const collectionsDir = join(options.output, 'collections')
-        await ensureDir(collectionsDir)
-
-        // Write realtime collections (ElectricSQL)
-        for (const [name, content] of collections.realtimeCollections) {
-          const fileName = `${toKebabCase(name)}.realtime.ts`
-          const filePath = join(collectionsDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
-        await writeFile(join(collectionsDir, 'index.ts'), collections.index)
-        console.log(`Written ${collections.realtimeCollections.size} realtime collections to ${collectionsDir}/`)
-
-        // Generate offline executor and actions if there are offline entities
-        if (collections.offlineActions.size > 0) {
-          console.log('\nGenerating offline executor and actions...')
-          const offlineDir = join(options.output, 'offline')
-          await ensureDir(offlineDir)
-
-          // Write offline executor singleton
-          if (collections.offlineExecutor) {
-            await writeFile(join(offlineDir, 'executor.ts'), collections.offlineExecutor)
-            if (options.verbose) {
-              console.log(`  Written: ${join(offlineDir, 'executor.ts')}`)
-            }
-          }
-
-          // Write offline actions for each entity
-          for (const [name, content] of collections.offlineActions) {
-            const fileName = `${toKebabCase(name)}.actions.ts`
-            const filePath = join(offlineDir, fileName)
-            await writeFile(filePath, content)
-            if (options.verbose) {
-              console.log(`  Written: ${filePath}`)
-            }
-          }
-
-          console.log(`Written offline executor and ${collections.offlineActions.size} action files to ${offlineDir}/`)
-        }
-      } else {
-        console.log('  No local_first: true entities found, skipping collections')
-      }
-    }
-
-    // Generate runtime config
-    if (options.entities) {
-      console.log('\nGenerating runtime config...')
-      const configResult = generateConfig(parsed)
-      await writeFile(join(options.output, 'config.ts'), configResult.config)
-      console.log(`Written config to ${options.output}/config.ts`)
-    }
-
-    // Generate entity wrappers (the public API)
-    if (options.entities) {
-      console.log('\nGenerating entity wrappers...')
-      const entities = generateEntityWrappers(parsed)
-
-      if (entities.wrappers.size > 0) {
-        const entitiesDir = join(options.output, 'entities')
-        await ensureDir(entitiesDir)
-
-        for (const [name, content] of entities.wrappers) {
-          const fileName = `${toKebabCase(name)}.ts`
-          const filePath = join(entitiesDir, fileName)
-          await writeFile(filePath, content)
-          if (options.verbose) {
-            console.log(`  Written: ${filePath}`)
-          }
-        }
-
-        await writeFile(join(entitiesDir, 'index.ts'), entities.index)
-        await writeFile(join(entitiesDir, 'types.ts'), entities.types)
-        console.log(`Written ${entities.wrappers.size} entity wrappers to ${entitiesDir}/`)
-
-        // Generate entities-hook.tsx (aggregator for useEntities)
-        console.log('\nGenerating entities hook...')
-        const entitiesHook = generateEntitiesHook(parsed)
-        await writeFile(join(options.output, 'entities-hook.tsx'), entitiesHook.code)
-        console.log(`Written entities-hook.tsx to ${options.output}/`)
-      } else {
-        console.log('  No entities with CRUD operations found')
-      }
-    }
-
-    // Generate root index
-    console.log('\nGenerating root index...')
-
-    // Root index exports entities (public API) + schemas (types)
-    // Internal modules (client, hooks, collections) are NOT exported
-    const rootIndexLines: string[] = [
-      '/**',
-      ' * Generated API',
-      ' *',
-      ' * Auto-generated from OpenAPI specification',
-      ' * Do not edit manually - regenerate using sync-patterns CLI',
-      ' *',
-      ' * PUBLIC API:',
-      ' *   - Entity wrappers (entities/) - THE interface for all data operations',
-      ' *   - Schema types (schemas/) - TypeScript types for all entities',
-      ' *   - Config (config.ts) - Runtime configuration',
-      ' *',
-      ' * INTERNAL (do not import directly):',
-      ' *   - client/ - Low-level API client',
-      ' *   - hooks/ - TanStack Query hooks',
-      ' *   - collections/ - TanStack DB collections',
-      ' */',
-      '',
-    ]
-
-    // Export entities if generated (the public API)
-    // Note: Entities re-export their related schema types, so we don't need to export schemas separately
-    if (options.entities) {
-      rootIndexLines.push('// Entity wrappers - THE public API for data operations')
-      rootIndexLines.push('// (Each entity module re-exports its related schema types)')
-      rootIndexLines.push("export * from './entities/index'")
-      rootIndexLines.push('')
-      rootIndexLines.push('// Aggregated entities hook for entity-agnostic pages')
-      rootIndexLines.push("export { useEntities, hasEntity, getEntityNames, type Entities, type EntityApi } from './entities-hook'")
-      rootIndexLines.push('')
-      rootIndexLines.push('// Runtime configuration')
-      rootIndexLines.push("export { configureSync, isLocalFirst, getElectricUrl, getSyncConfig } from './config'")
-      rootIndexLines.push('')
-    } else {
-      // No entities - export schemas and hooks directly
-      if (options.schemas) {
-        rootIndexLines.push('// Schema types')
-        rootIndexLines.push("export * from './schemas/index'")
-        rootIndexLines.push('')
-      }
-      if (options.hooks) {
-        rootIndexLines.push('// React hooks')
-        rootIndexLines.push("export * from './hooks/index'")
-        rootIndexLines.push('')
-      }
-    }
-
-    await writeFile(join(options.output, 'index.ts'), rootIndexLines.join('\n'))
-
-    // Generate a types.ts alias for convenience
-    const typesAlias = `/**
- * Type Re-exports
- *
- * Convenience re-export of all schema types
- */
-
-export * from './schemas/index'
-`
-    await writeFile(join(options.output, 'types.ts'), typesAlias)
-
+    // Generate using new architecture
+    await generateWithNewArchitecture(spec, options)
     console.log('\n✅ Generation complete!')
     console.log(`📦 Generated files in: ${options.output}`)
   } catch (error) {
