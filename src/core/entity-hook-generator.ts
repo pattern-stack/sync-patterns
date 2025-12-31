@@ -40,6 +40,11 @@ export interface EntityHookGeneratorOptions {
   broadcastIntegration?: boolean
   /** Query stale time in milliseconds (default: 60000 = 1 minute) */
   staleTime?: number
+  /**
+   * Import path for runtime utilities (useBroadcastInvalidation).
+   * Default: '@pattern-stack/sync-patterns/runtime'
+   */
+  runtimeImportPath?: string
 }
 
 const DEFAULT_OPTIONS: Required<EntityHookGeneratorOptions> = {
@@ -47,6 +52,7 @@ const DEFAULT_OPTIONS: Required<EntityHookGeneratorOptions> = {
   optimisticMutations: true,
   broadcastIntegration: true,
   staleTime: 60000,
+  runtimeImportPath: '@pattern-stack/sync-patterns/runtime',
 }
 
 // =============================================================================
@@ -177,7 +183,7 @@ export class EntityHookGenerator {
     // Broadcast import (if enabled)
     if (this.options.broadcastIntegration) {
       imports.push(
-        `import { useBroadcastInvalidation } from '../runtime/useBroadcastInvalidation.js'`
+        `import { useBroadcastInvalidation } from '${this.options.runtimeImportPath}'`
       )
     }
 
@@ -520,7 +526,7 @@ ${broadcastBlock}
 
     const optimisticBlock = this.options.optimisticMutations
       ? `
-    onMutate: async (newData) => {
+    onMutate: async (newData: ${createType}) => {
       // Cancel in-flight fetches
       await queryClient.cancelQueries({ queryKey: ${singular}Keys.lists() })
 
@@ -539,7 +545,7 @@ ${broadcastBlock}
       return { tempId }
     },
 
-    onSuccess: (server${pascalName}, _variables, context) => {
+    onSuccess: (server${pascalName}: ${pascalName}, _variables: ${createType}, context: { tempId: string } | undefined) => {
       // Replace temp with real ${singular} from server
       if (context?.tempId) {
         ${name}Collection.delete(context.tempId)
@@ -547,7 +553,7 @@ ${broadcastBlock}
       ${name}Collection.upsert(server${pascalName})
     },
 
-    onError: (_error, _variables, context) => {
+    onError: (_error: Error, _variables: ${createType}, context: { tempId: string } | undefined) => {
       // Rollback optimistic insert
       if (context?.tempId) {
         ${name}Collection.delete(context.tempId)
@@ -586,9 +592,13 @@ ${optimisticBlock}
 `
       : ''
 
+    // Define the mutation variables type for reuse
+    const mutationVarsType = `{ id: string; data: ${updateType} }`
+    const contextType = `{ previous: ${pascalName} | undefined }`
+
     const optimisticBlock = this.options.optimisticMutations
       ? `
-    onMutate: async ({ id, data }) => {
+    onMutate: async ({ id, data }: ${mutationVarsType}) => {
       await queryClient.cancelQueries({ queryKey: ${singular}Keys.detail(id) })
 
       // Snapshot for rollback
@@ -605,12 +615,12 @@ ${optimisticBlock}
       return { previous }
     },
 
-    onSuccess: (server${pascalName}) => {
+    onSuccess: (server${pascalName}: ${pascalName}) => {
       // Merge server response
       ${name}Collection.upsert(server${pascalName})
     },
 
-    onError: (_error, { id }, context) => {
+    onError: (_error: Error, { id }: ${mutationVarsType}, context: ${contextType} | undefined) => {
       // Rollback
       if (context?.previous) {
         ${name}Collection.upsert(context.previous)
@@ -630,7 +640,7 @@ ${jsdocBlock}export function useUpdate${pascalName}() {
     mutationFn: ({ id, data }: { id: string; data: ${updateType} }) =>
       ${name}Api.update(id, data),
 ${optimisticBlock}
-    onSettled: (_data, _error, { id }) => {
+    onSettled: (_data: ${pascalName} | undefined, _error: Error | null, { id }: { id: string; data: ${updateType} }) => {
       queryClient.invalidateQueries({ queryKey: ${singular}Keys.detail(id) })
     },
   })
@@ -648,9 +658,11 @@ ${optimisticBlock}
 `
       : ''
 
+    const deleteContextType = `{ previous: ${pascalName} | undefined }`
+
     const optimisticBlock = this.options.optimisticMutations
       ? `
-    onMutate: async (id) => {
+    onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: ${singular}Keys.all })
 
       // Snapshot for rollback
@@ -662,7 +674,7 @@ ${optimisticBlock}
       return { previous }
     },
 
-    onError: (_error, _id, context) => {
+    onError: (_error: Error, _id: string, context: ${deleteContextType} | undefined) => {
       // Rollback
       if (context?.previous) {
         ${name}Collection.insert(context.previous)

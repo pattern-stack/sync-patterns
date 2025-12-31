@@ -45,6 +45,12 @@ export interface HookGeneratorOptions {
   broadcastIntegration?: boolean
   /** Enable broadcast emission on mutations for realtime entities (default: true) */
   broadcastOnMutations?: boolean
+  /**
+   * Import path for runtime utilities (useBroadcastInvalidation, useBroadcast).
+   * Default: '@pattern-stack/sync-patterns/runtime'
+   * Set to relative path if copying runtime to generated output.
+   */
+  runtimeImportPath?: string
 }
 
 const DEFAULT_OPTIONS: Required<HookGeneratorOptions> = {
@@ -52,6 +58,7 @@ const DEFAULT_OPTIONS: Required<HookGeneratorOptions> = {
   optimisticMutations: true,
   broadcastIntegration: true,
   broadcastOnMutations: true,
+  runtimeImportPath: '@pattern-stack/sync-patterns/runtime',
 }
 
 export class HookGenerator {
@@ -108,13 +115,13 @@ export class HookGenerator {
       lines.push('')
     }
 
-    // Mutation hooks
-    if (entity.operations.create) {
+    // Mutation hooks - only generate if schemas are available
+    if (entity.operations.create && this.hasCreateSchemas(entity)) {
       lines.push(this.generateCreateMutation(entity))
       lines.push('')
     }
 
-    if (entity.operations.update) {
+    if (entity.operations.update && this.hasUpdateSchemas(entity)) {
       lines.push(this.generateUpdateMutation(entity))
       lines.push('')
     }
@@ -169,12 +176,12 @@ export class HookGenerator {
 
     // Broadcast invalidation hook import (when broadcast integration is enabled for queries)
     if (this.options.broadcastIntegration && (entity.operations.list || entity.operations.get)) {
-      imports.push(`import { useBroadcastInvalidation } from '@pattern-stack/sync-patterns/runtime'`)
+      imports.push(`import { useBroadcastInvalidation } from '${this.options.runtimeImportPath}'`)
     }
 
     // Broadcast hook for emitting events on mutations (realtime mode entities)
     if (needsBroadcastForMutations) {
-      imports.push(`import { useBroadcast } from '@pattern-stack/sync-patterns/runtime'`)
+      imports.push(`import { useBroadcast } from '${this.options.runtimeImportPath}'`)
     }
 
     // Type imports
@@ -793,6 +800,38 @@ ${broadcastSetup}
 }`
   }
 
+  // ===========================================================================
+  // Schema Availability Checks
+  // ===========================================================================
+
+  /**
+   * Check if entity has schemas required for create operation
+   */
+  private hasCreateSchemas(entity: EntityDefinition): boolean {
+    const op = entity.operations.create
+    if (!op) return false
+    // Must have request schema (what to send) and response schema (what we get back)
+    const hasRequest = !!(entity.schemas.createRequest || op.requestSchema?.name)
+    const hasResponse = !!(entity.schemas.item || op.responseSchema?.name)
+    return hasRequest && hasResponse
+  }
+
+  /**
+   * Check if entity has schemas required for update operation
+   */
+  private hasUpdateSchemas(entity: EntityDefinition): boolean {
+    const op = entity.operations.update
+    if (!op) return false
+    // Must have request schema and response schema
+    const hasRequest = !!(entity.schemas.updateRequest || op.requestSchema?.name)
+    const hasResponse = !!(entity.schemas.item || op.responseSchema?.name)
+    return hasRequest && hasResponse
+  }
+
+  // ===========================================================================
+  // Output Generators
+  // ===========================================================================
+
   /**
    * Generate query keys file
    */
@@ -854,10 +893,10 @@ ${broadcastSetup}
       if (entity.metadataOperation && entity.operations.list) {
         hookNames.push(`use${entity.pascalName}sWithMeta`)
       }
-      if (entity.operations.create) {
+      if (entity.operations.create && this.hasCreateSchemas(entity)) {
         hookNames.push(`useCreate${entity.pascalName}`)
       }
-      if (entity.operations.update) {
+      if (entity.operations.update && this.hasUpdateSchemas(entity)) {
         hookNames.push(`useUpdate${entity.pascalName}`)
       }
       if (entity.operations.delete) {

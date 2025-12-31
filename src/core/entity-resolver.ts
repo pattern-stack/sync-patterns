@@ -340,36 +340,48 @@ export class EntityResolver {
     }
 
     // CRUD detection by operationId prefix
-    // Match against both plural (accounts) and singular (account) entity names
-    const entityPattern = new RegExp(`(${entityName}|${singular})`, 'i')
+    // Entity name must come IMMEDIATELY after verb prefix for standard CRUD
+    // e.g., "list_budgets" → list + budgets = CRUD list ✅
+    // e.g., "get_over_budget" → get + over_budget ≠ budgets = custom ✅
+    // e.g., "get_budget" → get + budget = CRUD get ✅
 
-    if (opName.startsWith('list_') && entityPattern.test(opName)) {
+    // Check if operation name matches "{verb}_{entity}" or "{verb}_{entity}_{extra}"
+    const matchesEntity = (prefix: string): boolean => {
+      if (!opName.startsWith(prefix)) return false
+      const afterPrefix = opName.slice(prefix.length)
+      // Must match entity name (plural or singular) at the start, optionally followed by underscore
+      const directMatch = new RegExp(`^(${entityName}|${singular})($|_)`, 'i')
+      return directMatch.test(afterPrefix)
+    }
+
+    if (matchesEntity('list_')) {
       return 'list'
     }
 
-    if (opName.startsWith('create_') && entityPattern.test(opName)) {
+    if (matchesEntity('create_')) {
       return 'create'
     }
 
     // 'get_' can be either single-item get (with {id}) or collection list (without {id})
     // e.g., "get_account" with {id} is CRUD get, "get_public_data" without {id} is list
-    if (opName.startsWith('get_') && entityPattern.test(opName)) {
+    if (matchesEntity('get_')) {
       const hasEntityIdParam = this.operationHasIdParam(operation, spec)
       return hasEntityIdParam ? 'get' : 'list'
     }
 
-    if (opName.startsWith('update_') && entityPattern.test(opName)) {
+    if (matchesEntity('update_')) {
       return 'update'
     }
 
     // Only explicit 'delete_' is CRUD delete; 'archive_' is a custom soft-delete operation
-    if (opName.startsWith('delete_') && entityPattern.test(opName)) {
+    if (matchesEntity('delete_')) {
       return 'delete'
     }
 
-    // If operationId doesn't mention the entity at all, it's likely a custom operation
-    // e.g., "get_stage_metadata" under /accounts/stages is custom, not CRUD
-    if (operationId && !entityPattern.test(opName)) {
+    // If operationId doesn't start with a standard CRUD verb for this entity, it's custom
+    // e.g., "get_over_budget" under /budgets is custom (not a CRUD operation on budgets)
+    const startsWithCrudVerb = ['list_', 'get_', 'create_', 'update_', 'delete_'].some(v => opName.startsWith(v))
+    if (startsWithCrudVerb) {
       return 'custom'
     }
 

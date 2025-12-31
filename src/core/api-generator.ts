@@ -133,17 +133,17 @@ export class ApiGenerator {
     const { name } = entity
     const methods: string[] = []
 
-    // CRUD methods
-    if (entity.operations.list) {
+    // CRUD methods - only generate if operation exists AND required schemas are available
+    if (entity.operations.list && this.hasListSchema(entity)) {
       methods.push(this.generateListMethod(entity))
     }
-    if (entity.operations.get) {
+    if (entity.operations.get && this.hasItemSchema(entity)) {
       methods.push(this.generateGetMethod(entity))
     }
-    if (entity.operations.create) {
+    if (entity.operations.create && this.hasCreateSchemas(entity)) {
       methods.push(this.generateCreateMethod(entity))
     }
-    if (entity.operations.update) {
+    if (entity.operations.update && this.hasUpdateSchemas(entity)) {
       methods.push(this.generateUpdateMethod(entity))
     }
     if (entity.operations.delete) {
@@ -179,7 +179,25 @@ ${methods.join(',\n\n')}
    */
   private generateListMethod(entity: EntityDefinition): string {
     const op = entity.operations.list!
-    const returnType = entity.schemas.listResponse || `${entity.pascalName}[]`
+    // Use actual schema from operation - for arrays, append []
+    const responseSchema = op.responseSchema
+    let returnType: string
+    if (entity.schemas.listResponse) {
+      // Explicit list response type (already includes array if needed)
+      returnType = entity.schemas.listResponse
+    } else if (responseSchema?.isArray && responseSchema.name) {
+      // Array of items
+      returnType = `${responseSchema.name}[]`
+    } else if (responseSchema?.name) {
+      // Single item or paginated response
+      returnType = responseSchema.name
+    } else if (entity.schemas.item) {
+      // Fallback to item schema as array
+      returnType = `${entity.schemas.item}[]`
+    } else {
+      // Last resort fallback
+      returnType = `${entity.pascalName}[]`
+    }
     const path = op.path
 
     const jsdoc = this.options.includeJSDoc
@@ -199,7 +217,8 @@ ${methods.join(',\n\n')}
    */
   private generateGetMethod(entity: EntityDefinition): string {
     const op = entity.operations.get!
-    const returnType = entity.schemas.item || entity.pascalName
+    // Use actual schema from operation, fall back to entity schema
+    const returnType = entity.schemas.item || op.responseSchema?.name || entity.pascalName
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
     const methodParams = this.buildMethodParams(op.pathParams)
     const paramMapping = this.createParamMapping(op.pathParams, methodParams)
@@ -222,8 +241,9 @@ ${methods.join(',\n\n')}
    */
   private generateCreateMethod(entity: EntityDefinition): string {
     const op = entity.operations.create!
-    const requestType = entity.schemas.createRequest || `${entity.pascalName}Create`
-    const returnType = entity.schemas.item || entity.pascalName
+    // Use actual schema from operation, fall back to entity schema
+    const requestType = entity.schemas.createRequest || op.requestSchema?.name || `${entity.pascalName}Create`
+    const returnType = entity.schemas.item || op.responseSchema?.name || entity.pascalName
     const path = op.path
 
     const jsdoc = this.options.includeJSDoc
@@ -243,8 +263,9 @@ ${methods.join(',\n\n')}
    */
   private generateUpdateMethod(entity: EntityDefinition): string {
     const op = entity.operations.update!
-    const requestType = entity.schemas.updateRequest || `${entity.pascalName}Update`
-    const returnType = entity.schemas.item || entity.pascalName
+    // Use actual schema from operation, fall back to entity schema
+    const requestType = entity.schemas.updateRequest || op.requestSchema?.name || `${entity.pascalName}Update`
+    const returnType = entity.schemas.item || op.responseSchema?.name || entity.pascalName
     const pathTemplate = this.createPathTemplate(op.path, op.pathParams)
     const methodParams = this.buildMethodParams(op.pathParams)
     const paramMapping = this.createParamMapping(op.pathParams, methodParams)
@@ -436,6 +457,54 @@ ${methods.join(',\n\n')}
     }
     return result
   }
+
+  // ===========================================================================
+  // Schema Availability Checks
+  // ===========================================================================
+
+  /**
+   * Check if entity has a valid list response schema
+   */
+  private hasListSchema(entity: EntityDefinition): boolean {
+    // Has explicit list response OR item schema (for array return)
+    return !!(entity.schemas.listResponse || entity.schemas.item ||
+              entity.operations.list?.responseSchema?.name)
+  }
+
+  /**
+   * Check if entity has a valid item schema (for get/create/update)
+   */
+  private hasItemSchema(entity: EntityDefinition): boolean {
+    return !!(entity.schemas.item || entity.operations.get?.responseSchema?.name)
+  }
+
+  /**
+   * Check if entity has schemas required for create operation
+   */
+  private hasCreateSchemas(entity: EntityDefinition): boolean {
+    const op = entity.operations.create
+    if (!op) return false
+    // Must have request schema (what to send) and response schema (what we get back)
+    const hasRequest = !!(entity.schemas.createRequest || op.requestSchema?.name)
+    const hasResponse = !!(entity.schemas.item || op.responseSchema?.name)
+    return hasRequest && hasResponse
+  }
+
+  /**
+   * Check if entity has schemas required for update operation
+   */
+  private hasUpdateSchemas(entity: EntityDefinition): boolean {
+    const op = entity.operations.update
+    if (!op) return false
+    // Must have request schema and response schema
+    const hasRequest = !!(entity.schemas.updateRequest || op.requestSchema?.name)
+    const hasResponse = !!(entity.schemas.item || op.responseSchema?.name)
+    return hasRequest && hasResponse
+  }
+
+  // ===========================================================================
+  // Output Generators
+  // ===========================================================================
 
   /**
    * Generate the shared client
