@@ -72,8 +72,16 @@ export class EntityResolver {
     // Extract shared schemas (non-entity schemas)
     // TODO: Implement shared schema extraction
 
-    // Extract UI metadata for each entity from their schemas
+    // Filter out entities without valid operations or schemas
+    // (e.g., utility tags that were incorrectly detected as entities)
     for (const [entityName, entity] of model.entities) {
+      if (!this.isValidEntity(entity)) {
+        model.entities.delete(entityName)
+      }
+    }
+
+    // Extract UI metadata for each entity from their schemas
+    for (const [, entity] of model.entities) {
       this.populateUIMetadata(entity, spec)
     }
 
@@ -217,9 +225,10 @@ export class EntityResolver {
     switch (operationType) {
       case 'list':
         entity.operations.list = opDef
-        // Extract list response schema
+        // Extract list response schema - include [] if it's an array response
         if (opDef.responseSchema) {
-          entity.schemas.listResponse = opDef.responseSchema.name
+          const { name, isArray } = opDef.responseSchema
+          entity.schemas.listResponse = isArray ? `${name}[]` : name
         }
         break
 
@@ -340,18 +349,45 @@ export class EntityResolver {
     }
 
     // CRUD detection by operationId prefix
-    // Entity name must come IMMEDIATELY after verb prefix for standard CRUD
-    // e.g., "list_budgets" → list + budgets = CRUD list ✅
-    // e.g., "get_over_budget" → get + over_budget ≠ budgets = custom ✅
-    // e.g., "get_budget" → get + budget = CRUD get ✅
+    // Entity name must appear at the END of the operation name (as the final word/phrase)
+    // This distinguishes CRUD from custom operations that mention the entity in a different context
+    //
+    // e.g., "list_budgets" → CRUD list ✅ (entity at end)
+    // e.g., "list_my_budgets" → CRUD list ✅ (entity at end)
+    // e.g., "get_budget" → CRUD get ✅ (entity at end)
+    // e.g., "get_over_budget" → custom ✅ (entity at end BUT preceded by "over_" making it a compound)
+    // e.g., "get_budget_summary" → custom ✅ (entity in middle, "summary" at end)
 
-    // Check if operation name matches "{verb}_{entity}" or "{verb}_{entity}_{extra}"
+    // Check if entity name appears at the END as a complete word
+    // For compounds like "over_budget", we check if the preceding word + entity form a compound
     const matchesEntity = (prefix: string): boolean => {
       if (!opName.startsWith(prefix)) return false
       const afterPrefix = opName.slice(prefix.length)
-      // Must match entity name (plural or singular) at the start, optionally followed by underscore
-      const directMatch = new RegExp(`^(${entityName}|${singular})($|_)`, 'i')
-      return directMatch.test(afterPrefix)
+
+      // Entity must be at the end, optionally preceded by simple modifiers like "my", "all", "public"
+      // But NOT preceded by compound-forming words like "over", "under", "new", etc.
+      const simpleModifiers = ['my', 'all', 'public', 'private', 'active', 'archived', 'deleted']
+      const compoundPrefixes = ['over', 'under', 'new', 'old', 'top', 'recent', 'pending', 'completed']
+
+      // Check if entity is at the end
+      const endsWithEntity = new RegExp(`(^|_)(${entityName}|${singular})$`, 'i')
+      if (!endsWithEntity.test(afterPrefix)) return false
+
+      // Check what precedes the entity (if anything)
+      const beforeEntity = afterPrefix.replace(new RegExp(`_?(${entityName}|${singular})$`, 'i'), '')
+      if (!beforeEntity) return true // Entity is right after prefix, definitely CRUD
+
+      // Check if preceding word is a simple modifier (allowed) vs compound prefix (not allowed)
+      const precedingWords = beforeEntity.split('_').filter(Boolean)
+      const lastWord = precedingWords[precedingWords.length - 1]?.toLowerCase()
+
+      if (lastWord && compoundPrefixes.includes(lastWord)) {
+        // "over_budget" is a compound, not CRUD
+        return false
+      }
+
+      // Simple modifiers are fine: "my_budgets", "all_accounts"
+      return true
     }
 
     if (matchesEntity('list_')) {
@@ -772,10 +808,39 @@ export class EntityResolver {
   }
 
   /**
+   * Validate that an entity has at least one valid operation with proper schemas.
+   * Entities without operations or with only operations that lack typed responses
+   * are filtered out to prevent generating broken code.
+   */
+  private isValidEntity(entity: EntityDefinition): boolean {
+    // Must have at least one CRUD operation
+    const hasOperation = !!(
+      entity.operations.list ||
+      entity.operations.get ||
+      entity.operations.create ||
+      entity.operations.update ||
+      entity.operations.delete
+    )
+    if (!hasOperation) return false
+
+    // Must have at least one schema (item or listResponse)
+    // This ensures we have typed responses, not just generic objects
+    const hasSchema = !!(entity.schemas.item || entity.schemas.listResponse)
+    if (!hasSchema) return false
+
+    return true
+  }
+
+  /**
    * Check if tag looks like a system tag
    */
   private isSystemTag(tag: string): boolean {
-    const systemTags = ['health', 'system', 'internal', 'auth', 'authentication', 'docs', 'default', 'utility']
+    // System/utility tags that don't represent CRUD entities
+    const systemTags = [
+      'health', 'system', 'internal', 'auth', 'authentication', 'docs', 'default', 'utility',
+      // Compound tags that represent utility operations, not entities
+      'bank-sync', 'sync-jobs', 'transaction-history',
+    ]
     return systemTags.includes(tag.toLowerCase())
   }
 

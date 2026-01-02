@@ -306,8 +306,8 @@ describe('ApiGenerator', () => {
       const accountsCode = output.entities.get('accounts')!
 
       // The nested route `/accounts/{account_id}/contacts/{contact_id}`
-      // has multiple path params, so should use exact names
-      expect(accountsCode).toMatch(/async get\(account_id: string, contact_id: string\)/)
+      // is a custom operation (not standard CRUD get) so gets a descriptive name
+      expect(accountsCode).toMatch(/async getAccountContact\(account_id: string, contact_id: string\)/)
 
       // Should use exact param names in template strings
       expect(accountsCode).toContain('${account_id}')

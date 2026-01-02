@@ -167,7 +167,15 @@
         "tags": ["Legacy"],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/LegacyItem" }
+                }
+              }
+            }
           }
         }
       }
@@ -175,6 +183,13 @@
   },
   "components": {
     "schemas": {
+      "LegacyItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "data": { "type": "string" }
+        }
+      },
       "Account": {
         "type": "object",
         "properties": {

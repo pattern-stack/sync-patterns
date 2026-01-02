@@ -12,7 +12,8 @@
   "paths": {
     "/api/v1/public": {
       "get": {
-        "operationId": "get_public_data",
+        "operationId": "list_public",
+        "tags": ["public"],
         "summary": "Public endpoint - explicitly no auth",
         "security": [],
         "responses": {
@@ -21,7 +22,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicData"
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/PublicData" }
                 }
               }
             }
@@ -31,7 +33,8 @@
     },
     "/api/v1/protected": {
       "get": {
-        "operationId": "get_protected_data",
+        "operationId": "list_protected",
+        "tags": ["protected"],
         "summary": "Protected endpoint - uses global auth",
         "responses": {
           "200": {
@@ -39,7 +42,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProtectedData"
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ProtectedData" }
                 }
               }
             }

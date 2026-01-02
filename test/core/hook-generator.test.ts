@@ -336,13 +336,14 @@ describe('HookGenerator', () => {
       expect(code).toContain('removeQueries')
     })
 
-    it('handles both array and paginated response formats in create', () => {
+    it('handles array response formats in create', () => {
       const model = resolveFixture('minimal-crud.json')
       const output = generator.generate(model)
       const code = output.entities.get('accounts')!
 
-      expect(code).toContain('if (Array.isArray(old))')
-      expect(code).toContain("if ('items' in old")
+      // Optimistic update handles array responses
+      expect(code).toContain('if (!old || !Array.isArray(old)) return old')
+      expect(code).toContain('[...old, tempItem]')
     })
 
     it('disables optimistic mutations when option is false', () => {

@@ -65,7 +65,16 @@ describe('EntityResolver', () => {
             get: { operationId: 'ready', responses: { '200': { description: 'OK' } } },
           },
           '/api/v1/accounts': {
-            get: { operationId: 'list_accounts', responses: { '200': { description: 'OK' } } },
+            get: {
+              operationId: 'list_accounts',
+              tags: ['accounts'],
+              responses: { '200': { description: 'OK', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Account' } } } } } },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Account: { type: 'object', properties: { id: { type: 'string' } } },
           },
         },
       }
@@ -481,18 +490,23 @@ describe('EntityResolver', () => {
               security: [{ pathAuth: [] }],
               get: {
                 operationId: 'list_items',
+                tags: ['items'],
                 summary: 'Inherits path-level',
-                responses: { '200': { description: 'OK' } },
+                responses: { '200': { description: 'OK', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Item' } } } } } },
               },
               post: {
                 operationId: 'create_item',
+                tags: ['items'],
                 summary: 'Operation-level override',
                 security: [{ operationAuth: [] }],
-                responses: { '201': { description: 'Created' } },
+                responses: { '201': { description: 'Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Item' } } } } },
               },
             },
           },
           components: {
+            schemas: {
+              Item: { type: 'object', properties: { id: { type: 'string' } } },
+            },
             securitySchemes: {
               globalAuth: { type: 'http', scheme: 'bearer' },
               pathAuth: { type: 'apiKey', in: 'header', name: 'X-Path-Key' },

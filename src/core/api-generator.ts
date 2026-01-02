@@ -102,9 +102,10 @@ export class ApiGenerator {
     const imports: string[] = []
     const types: Set<string> = new Set()
 
-    // Collect types from schemas
+    // Collect types from schemas (strip [] from array types for imports)
+    const stripArraySuffix = (type: string) => type.replace(/\[\]$/, '')
     if (entity.schemas.item) types.add(entity.schemas.item)
-    if (entity.schemas.listResponse) types.add(entity.schemas.listResponse)
+    if (entity.schemas.listResponse) types.add(stripArraySuffix(entity.schemas.listResponse))
     if (entity.schemas.createRequest) types.add(entity.schemas.createRequest)
     if (entity.schemas.updateRequest) types.add(entity.schemas.updateRequest)
 

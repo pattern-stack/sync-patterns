@@ -157,12 +157,21 @@ export class HookGenerator {
       entity.syncMode === 'realtime' &&
       (entity.operations.create || entity.operations.update || entity.operations.delete)
 
-    // TanStack Query imports
-    const queryImports: string[] = ['useQueryClient']
+    // Check if entity has any mutations that we'll generate
+    const hasCreateMutation = entity.operations.create && this.hasCreateSchemas(entity)
+    const hasUpdateMutation = entity.operations.update && this.hasUpdateSchemas(entity)
+    const hasDeleteMutation = entity.operations.delete
+    const hasMutations = hasCreateMutation || hasUpdateMutation || hasDeleteMutation
+
+    // TanStack Query imports - only import what's needed
+    const queryImports: string[] = []
+    if (hasMutations) {
+      queryImports.push('useQueryClient')
+    }
     if (entity.operations.list || entity.operations.get) {
       queryImports.push('useQuery', 'type UseQueryResult')
     }
-    if (entity.operations.create || entity.operations.update || entity.operations.delete) {
+    if (hasMutations) {
       queryImports.push('useMutation', 'type UseMutationResult')
     }
 
@@ -184,10 +193,11 @@ export class HookGenerator {
       imports.push(`import { useBroadcast } from '${this.options.runtimeImportPath}'`)
     }
 
-    // Type imports
+    // Type imports (strip [] from array types for imports)
     const types: Set<string> = new Set()
+    const stripArraySuffix = (type: string) => type.replace(/\[\]$/, '')
     if (entity.schemas.item) types.add(entity.schemas.item)
-    if (entity.schemas.listResponse) types.add(entity.schemas.listResponse)
+    if (entity.schemas.listResponse) types.add(stripArraySuffix(entity.schemas.listResponse))
     if (entity.schemas.createRequest) types.add(entity.schemas.createRequest)
     if (entity.schemas.updateRequest) types.add(entity.schemas.updateRequest)
 
@@ -394,7 +404,10 @@ ${jsdoc}export function use${pascalName}(id: string, options: Use${pascalName}Op
     // Check if this entity needs broadcast on mutations (realtime/local_first mode)
     const emitBroadcast = this.options.broadcastOnMutations && entity.syncMode === 'realtime'
 
-    if (this.options.optimisticMutations) {
+    // Only generate optimistic mutations if there's a list operation to update
+    const canOptimistic = this.options.optimisticMutations && entity.operations.list
+
+    if (canOptimistic) {
       const jsdoc = this.options.includeJSDoc
         ? `/**
  * Create a new ${singular} with optimistic update
@@ -444,24 +457,14 @@ ${broadcastSetup}
       const previousData = queryClient.getQueryData<${listType}>(queryKeys.${name}.all)
 
       // Optimistically add to list with temp ID
-      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old) => {
-        if (!old) return old
+      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old): ${listType} | undefined => {
+        if (!old || !Array.isArray(old)) return old
         const tempItem = {
           ...newData,
           id: crypto.randomUUID(),
           created_at: new Date().toISOString(),
         } as unknown as ${returnType}
-        // Handle both array and paginated response formats
-        if (Array.isArray(old)) {
-          return [...old, tempItem] as ${listType}
-        }
-        if ('items' in old && Array.isArray((old as { items: unknown[] }).items)) {
-          return {
-            ...old,
-            items: [...(old as { items: ${returnType}[] }).items, tempItem],
-          } as ${listType}
-        }
-        return old
+        return [...old, tempItem] as ${listType}
       })
 
       return { previousData }
@@ -585,13 +588,13 @@ ${broadcastSetup}
       const previousData = queryClient.getQueryData<${returnType}>(queryKeys.${name}.detail(id))
 
       // Optimistically update the entity
-      queryClient.setQueryData<${returnType}>(queryKeys.${name}.detail(id), (old) => {
+      queryClient.setQueryData<${returnType}>(queryKeys.${name}.detail(id), (old): ${returnType} | undefined => {
         if (!old) return old
         return {
           ...old,
           ...data,
           updated_at: new Date().toISOString(),
-        }
+        } as ${returnType}
       })
 
       return { previousData }
@@ -668,7 +671,10 @@ ${broadcastSetup}
     // Check if this entity needs broadcast on mutations (realtime/local_first mode)
     const emitBroadcast = this.options.broadcastOnMutations && entity.syncMode === 'realtime'
 
-    if (this.options.optimisticMutations) {
+    // Only generate optimistic mutations if there's a list operation to update
+    const canOptimistic = this.options.optimisticMutations && entity.operations.list
+
+    if (canOptimistic) {
       const jsdoc = this.options.includeJSDoc
         ? `/**
  * Delete a ${singular} with optimistic update
@@ -718,21 +724,9 @@ ${broadcastSetup}
       const previousData = queryClient.getQueryData<${listType}>(queryKeys.${name}.all)
 
       // Optimistically remove from list
-      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old) => {
-        if (!old) return old
-        // Handle both array and paginated response formats
-        if (Array.isArray(old)) {
-          return old.filter((item: ${returnType}) => (item as { id: string }).id !== id) as ${listType}
-        }
-        if ('items' in old && Array.isArray((old as { items: unknown[] }).items)) {
-          return {
-            ...old,
-            items: (old as { items: ${returnType}[] }).items.filter(
-              (item: ${returnType}) => (item as { id: string }).id !== id
-            ),
-          } as ${listType}
-        }
-        return old
+      queryClient.setQueryData<${listType}>(queryKeys.${name}.all, (old): ${listType} | undefined => {
+        if (!old || !Array.isArray(old)) return old
+        return old.filter((item: ${returnType}) => (item as { id: string }).id !== id) as ${listType}
       })
 
       // Remove individual query

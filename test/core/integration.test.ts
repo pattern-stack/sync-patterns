@@ -61,11 +61,19 @@ describe('Integration: sales-patterns spec', () => {
     it('detects CRUD operations for accounts', () => {
       const accounts = model.entities.get('accounts')!
 
+      // sales-patterns uses non-standard operation names for some CRUD:
+      // - list_accounts → list ✓
+      // - create_account → create ✓
+      // - get_account_full_context → custom (not standard get)
+      // - update_account_with_tracking → custom (not standard update)
+      // - archive_account → delete ✓
       expect(accounts.operations.list).toBeDefined()
-      expect(accounts.operations.get).toBeDefined()
       expect(accounts.operations.create).toBeDefined()
-      expect(accounts.operations.update).toBeDefined()
       expect(accounts.operations.delete).toBeDefined()
+
+      // These are custom operations in sales-patterns
+      expect(accounts.operations.get).toBeUndefined()
+      expect(accounts.operations.update).toBeUndefined()
     })
 
     it('detects custom operations for accounts', () => {
@@ -108,15 +116,18 @@ describe('Integration: sales-patterns spec', () => {
       const output = apiGenerator.generate(model)
       const code = output.entities.get('accounts')!
 
-      // Should have all CRUD methods
+      // sales-patterns only has list, create, delete as standard CRUD
+      // (get and update are custom operations with non-standard names)
       expect(code).toContain('async list()')
-      expect(code).toContain('async get(id: string)')
       expect(code).toContain('async create(')
-      expect(code).toContain('async update(')
       expect(code).toContain('async delete(')
 
       // Should have listWithMeta
       expect(code).toContain('async listWithMeta(')
+
+      // Custom operations should be generated
+      expect(code).toContain('getAccountFullContext')
+      expect(code).toContain('updateAccountWithTracking')
     })
 
     it('generates client with configuration', () => {
@@ -149,15 +160,19 @@ describe('Integration: sales-patterns spec', () => {
       const output = hookGenerator.generate(model)
       const code = output.entities.get('accounts')!
 
-      // Query hooks
+      // Query hooks - only useAccounts since no standard get operation
       expect(code).toContain('useAccounts')
-      expect(code).toContain('useAccount')
       expect(code).toContain('useAccountsWithMeta')
 
-      // Mutation hooks
+      // No useAccount since get_account_full_context is a custom operation
+      expect(code).not.toContain('useAccount(')
+
+      // Mutation hooks - only create and delete (update is custom)
       expect(code).toContain('useCreateAccount')
-      expect(code).toContain('useUpdateAccount')
       expect(code).toContain('useDeleteAccount')
+
+      // No useUpdateAccount since update_account_with_tracking is custom
+      expect(code).not.toContain('useUpdateAccount')
     })
 
     it('generates query keys for all entities', () => {
