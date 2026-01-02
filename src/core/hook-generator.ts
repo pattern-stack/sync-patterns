@@ -41,9 +41,16 @@ export interface HookGeneratorOptions {
   includeJSDoc?: boolean
   /** Enable optimistic mutations (default: true) */
   optimisticMutations?: boolean
-  /** Enable broadcast integration for query hooks (default: true) */
+  /**
+   * Enable broadcast integration for query hooks (default: false)
+   * Requires BroadcastProvider in the React component tree.
+   * Set to true when broadcast infrastructure is configured.
+   */
   broadcastIntegration?: boolean
-  /** Enable broadcast emission on mutations for realtime entities (default: true) */
+  /**
+   * Enable broadcast emission on mutations for realtime entities (default: false)
+   * Requires BroadcastProvider in the React component tree.
+   */
   broadcastOnMutations?: boolean
   /**
    * Import path for runtime utilities (useBroadcastInvalidation, useBroadcast).
@@ -56,8 +63,8 @@ export interface HookGeneratorOptions {
 const DEFAULT_OPTIONS: Required<HookGeneratorOptions> = {
   includeJSDoc: true,
   optimisticMutations: true,
-  broadcastIntegration: true,
-  broadcastOnMutations: true,
+  broadcastIntegration: false,  // Requires BroadcastProvider setup
+  broadcastOnMutations: false,  // Requires BroadcastProvider setup
   runtimeImportPath: '@pattern-stack/sync-patterns/runtime',
 }
 

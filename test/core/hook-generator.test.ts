@@ -33,13 +33,16 @@ function resolveFixture(name: string): EntityModel {
 
 describe('HookGenerator', () => {
   let generator: HookGenerator
+  let generatorWithBroadcast: HookGenerator
   let generatorWithoutOptimistic: HookGenerator
-  let generatorWithoutBroadcast: HookGenerator
 
   beforeAll(() => {
-    generator = new HookGenerator()
+    generator = new HookGenerator()  // Default: no broadcast
+    generatorWithBroadcast = new HookGenerator({
+      broadcastIntegration: true,
+      broadcastOnMutations: true,
+    })
     generatorWithoutOptimistic = new HookGenerator({ optimisticMutations: false })
-    generatorWithoutBroadcast = new HookGenerator({ broadcastIntegration: false })
   })
 
   describe('file generation', () => {
@@ -367,18 +370,18 @@ describe('HookGenerator', () => {
   })
 
   describe('broadcast integration', () => {
-    it('imports useBroadcastInvalidation', () => {
+    it('imports useBroadcastInvalidation when enabled', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).toContain("import { useBroadcastInvalidation }")
       expect(code).toContain("from '@pattern-stack/sync-patterns/runtime'")
     })
 
-    it('generates list hook with autoRefresh option', () => {
+    it('generates list hook with autoRefresh option when broadcast enabled', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).toContain('interface UseAccountsOptions')
@@ -386,9 +389,9 @@ describe('HookGenerator', () => {
       expect(code).toContain('options: UseAccountsOptions = {}')
     })
 
-    it('calls useBroadcastInvalidation in list hook', () => {
+    it('calls useBroadcastInvalidation in list hook when broadcast enabled', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).toContain('useBroadcastInvalidation({')
@@ -397,27 +400,27 @@ describe('HookGenerator', () => {
       expect(code).toContain('enabled: autoRefresh')
     })
 
-    it('generates get hook with autoRefresh option', () => {
+    it('generates get hook with autoRefresh option when broadcast enabled', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).toContain('interface UseAccountOptions')
       expect(code).toContain('id: string, options: UseAccountOptions')
     })
 
-    it('calls useBroadcastInvalidation in get hook', () => {
+    it('calls useBroadcastInvalidation in get hook when broadcast enabled', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).toContain('queryKeyPrefix: queryKeys.accounts.detail(id)')
       expect(code).toContain('enabled: autoRefresh && !!id')
     })
 
-    it('disables broadcast integration when option is false', () => {
+    it('disables broadcast integration by default', () => {
       const model = resolveFixture('minimal-crud.json')
-      const output = generatorWithoutBroadcast.generate(model)
+      const output = generator.generate(model)
       const code = output.entities.get('accounts')!
 
       expect(code).not.toContain('useBroadcastInvalidation')
@@ -426,7 +429,7 @@ describe('HookGenerator', () => {
 
     it('uses entity singular name as broadcast channel', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       expect(contactsCode).toContain("channel: 'contact'")
@@ -434,9 +437,9 @@ describe('HookGenerator', () => {
   })
 
   describe('broadcast on mutations', () => {
-    it('imports useBroadcast for realtime entities with mutations', () => {
+    it('imports useBroadcast for realtime entities with mutations when enabled', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       // Contacts is realtime mode with mutations, should import useBroadcast
@@ -444,18 +447,18 @@ describe('HookGenerator', () => {
       expect(contactsCode).toContain("from '@pattern-stack/sync-patterns/runtime'")
     })
 
-    it('does not import useBroadcast for non-realtime entities', () => {
+    it('does not import useBroadcast by default', () => {
       const model = resolveFixture('minimal-crud.json')
       const output = generator.generate(model)
       const accountsCode = output.entities.get('accounts')!
 
-      // Accounts is api mode (default), should NOT import useBroadcast for emit
+      // Default: broadcast disabled, should NOT import useBroadcast
       expect(accountsCode).not.toContain("import { useBroadcast }")
     })
 
     it('emits broadcast event on create mutation success for realtime entities', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       // Should use useBroadcast and emit on create success
@@ -466,7 +469,7 @@ describe('HookGenerator', () => {
 
     it('emits broadcast event on update mutation success for realtime entities', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       // Should emit on update success
@@ -475,7 +478,7 @@ describe('HookGenerator', () => {
 
     it('emits broadcast event on delete mutation success for realtime entities', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       // Should emit on delete success
@@ -484,7 +487,7 @@ describe('HookGenerator', () => {
 
     it('includes entity_id in broadcast payload', () => {
       const model = resolveFixture('with-sync-modes.json')
-      const output = generator.generate(model)
+      const output = generatorWithBroadcast.generate(model)
       const contactsCode = output.entities.get('contacts')!
 
       expect(contactsCode).toContain("entity_id:")
